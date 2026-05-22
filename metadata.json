@@ -1,0 +1,6 @@
+{
+  "name": "SecureFlow",
+  "description": "Ecosistema móvil de seguridad, asistencia vial e insurtech branded as SecureFlow.",
+  "requestFramePermissions": ["camera", "microphone", "geolocation"],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

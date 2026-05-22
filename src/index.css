@@ -1,0 +1,89 @@
+@import "tailwindcss";
+
+@layer base {
+  html, body, #root {
+    height: 100%;
+    margin: 0;
+    padding: 0;
+    font-family: 'Plus Jakarta Sans', sans-serif;
+    color-scheme: dark;
+    background-color: #0A0C10;
+  }
+}
+
+/* Immersive UI CSS Core Definitions */
+.bg-immersive-dark {
+  background-color: #0A0C10 !important;
+}
+
+.bg-immersive-frame {
+  background-color: #12141C !important;
+}
+
+.bg-immersive-card {
+  background-color: #1E212B !important;
+}
+
+.glow-blue {
+  box-shadow: 0 10px 25px -5px rgba(59, 130, 246, 0.5) !important;
+}
+
+.glow-cyan {
+  box-shadow: 0 8px 20px -4px rgba(6, 182, 212, 0.4) !important;
+}
+
+.glow-cosmic {
+  box-shadow: 0 0 60px -15px rgba(59, 130, 246, 0.3) !important;
+}
+
+.border-immersive {
+  border-color: rgba(255, 255, 255, 0.05) !important;
+}
+
+.border-glowing-blue {
+  border-color: rgba(59, 130, 246, 0.25) !important;
+}
+
+/* Custom styled transitions and scrollbars to fit active simulation */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: rgba(10, 12, 16, 0.3);
+}
+::-webkit-scrollbar-thumb {
+  background: rgba(148, 163, 184, 0.2);
+  border-radius: 3px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(148, 163, 184, 0.4);
+}
+
+@keyframes pulse-glowing {
+  0%, 100% {
+    transform: scale(1);
+    box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.7), 0 0 20px rgba(239, 68, 68, 0.4);
+  }
+  50% {
+    transform: scale(1.05);
+    box-shadow: 0 0 0 16px rgba(239, 68, 68, 0), 0 0 40px rgba(239, 68, 68, 0.6);
+  }
+}
+
+.animate-pulse-glow {
+  animation: pulse-glowing 2s infinite ease-in-out;
+}
+
+@keyframes sweep-radar {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.animate-sweep {
+  animation: sweep-radar 4s linear infinite;
+}

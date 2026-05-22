@@ -1,0 +1,22 @@
+{
+  "short_name": "SecureFlow",
+  "name": "SecureFlow - Ecosistema de Asistencia",
+  "description": "Ecosistema de Asistencia y Resguardo Vial, Legal y Médico",
+  "icons": [
+    {
+      "src": "https://img.icons8.com/fluency/192/000000/shield.png",
+      "type": "image/png",
+      "sizes": "192x192"
+    },
+    {
+      "src": "https://img.icons8.com/fluency/512/000000/shield.png",
+      "type": "image/png",
+      "sizes": "512x512"
+    }
+  ],
+  "start_url": "/",
+  "background_color": "#020617",
+  "theme_color": "#020617",
+  "display": "standalone",
+  "orientation": "portrait"
+}

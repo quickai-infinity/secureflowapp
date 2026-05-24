@@ -101,6 +101,7 @@ interface Emergency {
   longitude: number;
   lawyerId?: string;
   tarifa?: number;
+  dailyRoomUrl?: string;
 }
 
 interface TowJob {
@@ -271,6 +272,10 @@ export default function App() {
   const [isMedicWindowOpen, setIsMedicWindowOpen] = useState<boolean>(false);
   const [isAmbulanceDailyCoActive, setIsAmbulanceDailyCoActive] = useState<boolean>(false);
   const [isMedicDailyCoActive, setIsMedicDailyCoActive] = useState<boolean>(false);
+  const [isLawyerDailyCoActive, setIsLawyerDailyCoActive] = useState<boolean>(false);
+  const [citizenVehicleType, setCitizenVehicleType] = useState<'coche' | 'moto'>(() => {
+    return (localStorage.getItem('secureflow_vehicle_type') as 'coche' | 'moto') || 'coche';
+  });
 
   // Real-time Ambulance simulation coords
   const [ambulanceCoords, setAmbulanceCoords] = useState<{lat: number, lng: number}>({lat: 10.4780, lng: -66.8960});
@@ -287,6 +292,9 @@ export default function App() {
   const [activeTowJob, setActiveTowJob] = useState<TowJob | null>(null);
   const [towDriverOnline, setTowDriverOnline] = useState(true);
   const [driverDebt, setDriverDebt] = useState<number>(0.00); // Fully cleared in production
+  const [driverBalance, setDriverBalance] = useState<number>(0.00);
+  const [ambulanceBalanceClean, setAmbulanceBalanceClean] = useState<number>(0.00);
+  const [medicBalanceClean, setMedicBalanceClean] = useState<number>(0.00);
   const [showBinanceModal, setShowBinanceModal] = useState(false);
   const [towDriverCoords, setTowDriverCoords] = useState<{lat: number, lng: number}>({lat: 10.4900, lng: -66.9100});
   const citizenCoords = {lat: 10.4850, lng: -66.9030};
@@ -399,6 +407,11 @@ export default function App() {
             phone: userData.contacto_emergencia_1_telefono || '',
             city: 'Caracas'
           });
+          const vSel = userData.vehicle_selection || userData.tipo_vehiculo;
+          if (vSel) {
+            setCitizenVehicleType(vSel as 'coche' | 'moto');
+            localStorage.setItem('secureflow_vehicle_type', vSel);
+          }
           if (userData.contacto_emergencia_1_nombre || userData.contacto_emergencia_1_telefono) {
             setAlertContacts({
               name1: userData.contacto_emergencia_1_nombre || 'Mi Madre',
@@ -424,6 +437,15 @@ export default function App() {
             city: 'Caracas',
             vehiclePlate: 'A92B45X'
           });
+          // Load gruero balance
+          const { data: sg } = await supabase
+            .from('saldos_grueros')
+            .select('balance')
+            .eq('user_id', userId)
+            .maybeSingle();
+          if (sg) {
+            setDriverBalance(Number(sg.balance) || 0.00);
+          }
         } else if (finalRole === 'ambulance') {
           setAmbulanceProfile({
             name: userData.nombre_completo,
@@ -432,6 +454,15 @@ export default function App() {
             city: 'Caracas',
             vehiclePlate: 'AMB-402X'
           });
+          // Load ambulance balance
+          const { data: sa } = await supabase
+            .from('saldos_ambulancias')
+            .select('balance')
+            .eq('user_id', userId)
+            .maybeSingle();
+          if (sa) {
+            setAmbulanceBalanceClean(Number(sa.balance) || 0.00);
+          }
         } else if (finalRole === 'medic') {
           setMedicProfile({
             name: userData.nombre_completo,
@@ -441,6 +472,15 @@ export default function App() {
             licenseNumber: 'MSAS-42.501',
             specialty: 'Medicina Crítica & Emergencias'
           });
+          // Load doctor balance
+          const { data: sm } = await supabase
+            .from('saldos_medicos')
+            .select('balance')
+            .eq('user_id', userId)
+            .maybeSingle();
+          if (sm) {
+            setMedicBalanceClean(Number(sm.balance) || 0.00);
+          }
         }
         setActiveDevice(finalRole as any);
       }
@@ -469,13 +509,19 @@ export default function App() {
     const fetchCallingEmergencies = async () => {
       const { data } = await supabase
         .from('emergencias_activas')
-        .select('*, usuarios(nombre_completo, contacto_emergencia_1_telefono)')
+        .select('*')
         .eq('estado', 'calling');
       
       if (data && data.length > 0) {
         const active = data[0];
-        const citizen_name = (active as any).usuarios?.nombre_completo || 'Ciudadano';
-        const citizen_phone = (active as any).usuarios?.contacto_emergencia_1_telefono || '';
+        const { data: userData } = await supabase
+          .from('usuarios')
+          .select('nombre_completo, contacto_emergencia_1_telefono')
+          .eq('id', active.ciudadano_id)
+          .maybeSingle();
+
+        const citizen_name = userData?.nombre_completo || 'Ciudadano';
+        const citizen_phone = userData?.contacto_emergencia_1_telefono || '';
         setActiveEmergency({
           id: active.id,
           citizenName: citizen_name,
@@ -484,11 +530,45 @@ export default function App() {
           status: 'calling',
           latitude: Number(active.ubicacion_lat),
           longitude: Number(active.ubicacion_lng),
-          tarifa: Number(active.tarifa_aplicada)
+          tarifa: Number(active.tarifa_aplicada),
+          dailyRoomUrl: active.daily_room_url
         });
-      } else {
-        setActiveEmergency(prev => prev?.status === 'calling' ? null : prev);
+        return;
       }
+
+      if (sessionUser) {
+        const { data: activeList } = await supabase
+          .from('emergencias_activas')
+          .select('*')
+          .eq('estado', 'active')
+          .eq('abogado_asignado_id', sessionUser.id);
+
+        if (activeList && activeList.length > 0) {
+          const active = activeList[0];
+          const { data: userData } = await supabase
+            .from('usuarios')
+            .select('nombre_completo, contacto_emergencia_1_telefono')
+            .eq('id', active.ciudadano_id)
+            .maybeSingle();
+
+          const citizen_name = userData?.nombre_completo || 'Ciudadano';
+          const citizen_phone = userData?.contacto_emergencia_1_telefono || '';
+          setActiveEmergency({
+            id: active.id,
+            citizenName: citizen_name,
+            citizenPhone: citizen_phone,
+            citizenCity: active.ubicacion_texto || 'Caracas',
+            status: 'active',
+            latitude: Number(active.ubicacion_lat),
+            longitude: Number(active.ubicacion_lng),
+            tarifa: Number(active.tarifa_aplicada),
+            dailyRoomUrl: active.daily_room_url
+          });
+          return;
+        }
+      }
+
+      setActiveEmergency(null);
     };
 
     fetchCallingEmergencies();
@@ -1031,15 +1111,35 @@ export default function App() {
     if (towChatScrollRef.current) towChatScrollRef.current.scrollTop = towChatScrollRef.current.scrollHeight;
   }, [towMessages]);
 
-  // AI Agent responder
+    // AI Agent responder
   const handleAgentSend = async () => {
     const text = agentInput.trim();
     if (!text) return;
 
-    const newMsgs = [...agentMessages, { sender: 'user' as const, text, time: '19:55' }];
+    const currentMsgTime = new Date().toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' });
+    const newMsgs = [...agentMessages, { sender: 'user' as const, text, time: currentMsgTime }];
     setAgentMessages(newMsgs);
     setAgentInput('');
     setIsIAPending(true);
+
+    if (sosState === 'active' || isLawyerDailyCoActive || activeEmergency) {
+      setTimeout(() => {
+        let lawyerReply = "Entendido, estoy al tanto de tu situación y resguardando toda tu telemetría legal. Cuéntame si hay algún oficial o funcionario militar intentando retener tu vehículo o documento.";
+        const lowerText = text.toLowerCase();
+        if (lowerText.includes('alcabala') || lowerText.includes('policia') || lowerText.includes('reten') || lowerText.includes('militar')) {
+          lawyerReply = "Nuestra legislación (Art. 68 de la CRBV) te ampara plenamente para registrar el procedimiento. Procede con cautela, mantén el altavoz y diles que tu abogado de SecureFlow está conectado en vivo de inmediato.";
+        } else if (lowerText.includes('gracia') || lowerText.includes('gracias') || lowerText.includes('ok') || lowerText.includes('perfecto')) {
+          lawyerReply = "De nada. Como tu defensor asignado, estoy listo para iniciar el reclamo judicial o administrativo si existe abuso. Mantente firme.";
+        }
+        setAgentMessages(m => [...m, { 
+          sender: 'bot', 
+          text: `⚖️ **Dra. María Mendoza:** ${lawyerReply}`, 
+          time: new Date().toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' }) 
+        }]);
+        setIsIAPending(false);
+      }, 1000);
+      return;
+    }
 
     // Check Plan limitations
     const maxConsults = activePlan === 'gratis' ? 5 : activePlan === 'estandar' ? 20 : 99999;
@@ -1223,20 +1323,25 @@ export default function App() {
       return;
     }
 
-    setSosState('calling');
+    setSosState('active'); // Directly activate the state
     setIsLiveVideoActive(true);
+    setIsLawyerDailyCoActive(true); // Automatically connect Daily.co
+    setCitizenTab('agent'); // Automatically open chat Tab
     setVideoStreamType('rear');
-    triggerPush('🚨 Llamada SOS Iniciada', 'Buscando el abogado de defensa penal disponible más cercano...');
+    triggerPush('🚨 Llamada SOS Iniciada', 'Conectando con la sala de defensa penal y amparo de guardia...');
     
     const emerId = Math.random().toString(36).substr(2, 6).toUpperCase();
+    const dailyUrlGenerated = `https://iframe.daily.co/secureflow-abogado-${emerId.toLowerCase()}`;
     const newEmergency: Emergency = {
       id: emerId,
       citizenName: citizenProfile.name,
       citizenPhone: citizenProfile.phone,
       citizenCity: citizenProfile.city,
-      status: 'calling',
+      status: 'active', // Active immediately
       latitude: citizenCoords.lat,
-      longitude: citizenCoords.lng
+      longitude: citizenCoords.lng,
+      tarifa: sosCostRate,
+      dailyRoomUrl: dailyUrlGenerated
     };
     setActiveEmergency(newEmergency);
 
@@ -1276,12 +1381,19 @@ export default function App() {
         id: emerId,
         ciudadano_id: sessionUser?.id || null,
         sala_webrtc_url: `https://secure.secureflow.ve/room/${emerId}`,
-        estado: 'calling',
+        estado: 'active',
         ubicacion_texto: citizenProfile.city,
         ubicacion_lat: citizenCoords.lat,
         ubicacion_lng: citizenCoords.lng,
         tarifa_aplicada: sosCostRate
       });
+
+      // Guardar el enlace mediante un UPDATE en la columna 'daily_room_url'
+      await supabase
+        .from('emergencias_activas')
+        .update({ daily_room_url: dailyUrlGenerated })
+        .eq('id', emerId);
+
     } catch (e) {
       console.error('Error inserting emergency row: ', e);
     }
@@ -1313,13 +1425,27 @@ export default function App() {
 
   // Professional Citizen Ambulance Despatch Requesting (Insurtech Dispatcher)
   const handleAmbulanceRequest = () => {
-    // Distance / Pricing simulation
     const distMeters = 2100; // 2.1 KM
-    const estimatedPrice = 45.00; // Flat base rate for ambulance
+    const distanceInKm = 2.1;
+    
+    // Config values based on user's vehicle profile (Coche vs Moto)
+    const baseFee = citizenVehicleType === 'coche' ? 30.00 : 20.00;
+    const kmRate = citizenVehicleType === 'coche' ? 5.00 : 3.00;
+    const estimatedPrice = baseFee + distanceInKm * kmRate;
+    
+    const driverReceives = estimatedPrice * 0.80;
+    const platformFee = estimatedPrice * 0.20;
 
     showMaterialConfirm(
       '🚑 Solicitar Ambulancia de Guardia',
-      `Hemos ubicado una unidad paramédica de resguardo SecureFlow a 2.1 Km de distancia.\n\nPrecio de traslado de urgencia: $${estimatedPrice.toFixed(2)} USD (Soporte Vital Básico incluido).\n\n¿Proceder con el despacho médico inmediato?`,
+      `Hemos ubicado una unidad paramédica de resguardo SecureFlow a 2.1 Km.\n\n` +
+      `Perfil Vehículo: ${citizenVehicleType === 'coche' ? '🚗 Automóvil / Coche' : '🏍️ Motocicleta / Moto'}\n` +
+      `Precio estimado por Km: $${kmRate.toFixed(2)} USD\n\n` +
+      `Detalle Financiero Transparente:\n` +
+      `• Total debitado a tu saldo: $${estimatedPrice.toFixed(2)} USD\n` +
+      `• Acreditado neto al paramédico: $${driverReceives.toFixed(2)} USD (80%)\n` +
+      `• Comisión SecureFlow: $${platformFee.toFixed(2)} USD (20%)\n\n` +
+      `¿Proceder con el despacho médico inmediato?`,
       async () => {
         const emerId = 'AMB-' + Math.random().toString(36).substr(2, 4).toUpperCase();
         
@@ -1327,8 +1453,16 @@ export default function App() {
           citizenName: citizenProfile.name || 'Ciudadano',
           citizenPhone: citizenProfile.phone || 'No phone',
           distance: distMeters,
+          price: estimatedPrice,
+          driverReceives,
+          platformFee,
+          vehicleType: citizenVehicleType,
           messages: [
-            { sender: 'driver', text: `🚑 Hola ${citizenProfile.name || 'Asegurado'}, soy el paramédico a cargo de la unidad de guardia. Estamos en ruta con sirena activa y visualizando tu GPS en mapa. Mantenga la calma.`, time: '19:55' }
+            { 
+              sender: 'driver', 
+              text: `🚑 Hola ${citizenProfile.name || 'Asegurado'}, soy el paramédico de guardia. Estamos en ruta con sirena activa y visualizando tu GPS en tiempo real. Mantén la calma. Puedes chatear conmigo por aquí.`, 
+              time: new Date().toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' }) 
+            }
           ]
         };
 
@@ -1336,7 +1470,7 @@ export default function App() {
           id: emerId,
           citizenName: citizenProfile.name || 'Ciudadano',
           citizenPhone: citizenProfile.phone || 'No phone',
-          status: 'pending',
+          status: 'dispatched',
           latitude: citizenCoords.lat,
           longitude: citizenCoords.lng,
           price: estimatedPrice,
@@ -1643,6 +1777,8 @@ export default function App() {
             auth_id: uId,
             rol: chosenRole,
             nombre_completo: finalName,
+            tipo_vehiculo: chosenRole === 'citizen' ? citizenVehicleType : null,
+            vehicle_selection: chosenRole === 'citizen' ? citizenVehicleType : null,
             contacto_emergencia_1_nombre: alertContacts.name1 || 'Mi Madre',
             contacto_emergencia_1_telefono: alertContacts.tel1 || '584249998877',
             contacto_emergencia_2_nombre: alertContacts.name2 || 'Mi Hermano',
@@ -1658,6 +1794,27 @@ export default function App() {
             creditos_disponibles: 35.0,
             consultas_ia_usadas: 0
           });
+
+          // Initialize professional balances to avoid empty rows
+          if (chosenRole === 'driver') {
+            await supabase.from('saldos_grueros').upsert({
+              user_id: uId,
+              balance: 0.00,
+              updated_at: new Date().toISOString()
+            }, { onConflict: 'user_id' });
+          } else if (chosenRole === 'ambulance') {
+            await supabase.from('saldos_ambulancias').upsert({
+              user_id: uId,
+              balance: 0.00,
+              updated_at: new Date().toISOString()
+            }, { onConflict: 'user_id' });
+          } else if (chosenRole === 'medic') {
+            await supabase.from('saldos_medicos').upsert({
+              user_id: uId,
+              balance: 0.00,
+              updated_at: new Date().toISOString()
+            }, { onConflict: 'user_id' });
+          }
 
           // Create complementary tables matching schemas
           if (chosenRole === 'lawyer') {
@@ -1754,13 +1911,27 @@ export default function App() {
 
   // Real synchronized Requesting of visual roadside assistance towing (Insurtech Dispatcher)
   const handleTowRequest = () => {
-    // Calculating Haversine distance
-    const distMeters = 3450; // 3.4 KM
-    const estimatedPrice = 20.0 + (distMeters / 1000) * 2.5;
+    const distMeters = 3450; // 3.45 KM
+    const distanceInKm = 3.45;
+    
+    // Config values based on user's vehicle profile (Coche vs Moto)
+    const baseFee = citizenVehicleType === 'coche' ? 20.00 : 12.00;
+    const kmRate = citizenVehicleType === 'coche' ? 3.50 : 2.00;
+    const estimatedPrice = baseFee + distanceInKm * kmRate;
+    
+    const driverReceives = estimatedPrice * 0.80;
+    const platformFee = estimatedPrice * 0.20;
 
     showMaterialConfirm(
-      '🚜 Solicitar Unidad Vial',
-      `Hemos ubicado la grúa oficial de la zona a 3.4 Km de distancia.\n\nTarifa Estimada Seguro: $${estimatedPrice.toFixed(2)} USD (Grúa Base + Recargo Vial por KM).\n\n¿Proceder con el despacho vial?`,
+      '🚜 Solicitar Unidad de Grúa Oficial',
+      `Hemos ubicado la grúa oficial disponible para tu zona a 3.45 Km.\n\n` +
+      `Perfil Vehículo: ${citizenVehicleType === 'coche' ? '🚗 Automóvil / Coche' : '🏍️ Motocicleta / Moto'}\n` +
+      `Precio estimado por Km: $${kmRate.toFixed(2)} USD\n\n` +
+      `Detalle Financiero Transparente:\n` +
+      `• Total debitado a tu saldo: $${estimatedPrice.toFixed(2)} USD\n` +
+      `• Acreditado neto al chofer: $${driverReceives.toFixed(2)} USD (80%)\n` +
+      `• Comisión SecureFlow: $${platformFee.toFixed(2)} USD (20%)\n\n` +
+      `¿Deseas confirmar el despacho del servicio y abrir el chat de asistencia?`,
       async () => {
         const emerId = 'VIAL-' + Math.random().toString(36).substr(2, 4).toUpperCase();
         
@@ -1768,8 +1939,16 @@ export default function App() {
           citizenName: citizenProfile.name || 'Ciudadano',
           citizenPhone: citizenProfile.phone || 'No phone',
           distance: distMeters,
+          price: estimatedPrice,
+          driverReceives,
+          platformFee,
+          vehicleType: citizenVehicleType,
           messages: [
-            { sender: 'driver', text: `🚨 Hola ${citizenProfile.name || 'Asegurado'}, soy el operador de grúa asignado. Ya voy en ruta hacia tu localización en tiempo real con mi remolque. Puedes escribirme por aquí.`, time: '19:55' }
+            { 
+              sender: 'driver', 
+              text: `🚨 Hola ${citizenProfile.name || 'Asegurado'}, soy el operador de grúa Carlos Ruiz. Ya voy en ruta hacia tu localización en tiempo real con mi remolque homologado para tu ${citizenVehicleType === 'coche' ? 'coche' : 'motocicleta'}. Puedes escribirme por aquí para coordinar.`, 
+              time: new Date().toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' }) 
+            }
           ]
         };
 
@@ -1777,14 +1956,14 @@ export default function App() {
           id: emerId,
           citizenName: citizenProfile.name || 'Ciudadano',
           citizenPhone: citizenProfile.phone || 'No phone',
-          status: 'pending',
+          status: 'active', // Transition to active immediately
           latitude: citizenCoords.lat,
           longitude: citizenCoords.lng,
           price: estimatedPrice,
           distance: distMeters
         };
 
-        setTowState('proposed');
+        setTowState('dispatched');
         setActiveTowJob(newJob);
         setTowMessages(initialMeta.messages);
 
@@ -1800,7 +1979,7 @@ export default function App() {
             tarifa_aplicada: estimatedPrice,
             sala_webrtc_url: JSON.stringify(initialMeta)
           });
-          triggerPush('🚜 Alerta Solicitud Grúa', 'Esperando confirmación de salida física del operador del remolque...');
+          triggerPush('🚜 Alerta Solicitud Grúa', 'Operador en camino. Se ha abierto el chat directo.');
         } catch (e) {
           console.error("Error creating calling_tow row in Supabase:", e);
         }
@@ -2105,41 +2284,234 @@ export default function App() {
     }
   };
 
-  // Complete tow job & updates commission debt of tow driver (DB Synced)
+  // Complete tow job & updates commission debt of tow driver (DB Synced & Real Transactions)
   const handleFinalizeTowJob = async () => {
     if (!activeTowJob) return;
 
-    const commission = activeTowJob.price * 0.10; // 10% tech maintenance commission
-    const formattedPrice = activeTowJob.price.toFixed(2);
-    const formattedCommission = commission.toFixed(2);
+    try {
+      // 1. Fetch emergency details from emergencias_activas to get the real citizen_id
+      const { data: emer } = await supabase
+        .from('emergencias_activas')
+        .select('*')
+        .eq('id', activeTowJob.id)
+        .maybeSingle();
 
-    showMaterialConfirm(
-      '🚜 Finalizar Remolque',
-      `¿Confirmas el traslado exitoso del siniestro del asegurado? Esto registrará la tarifa de $${formattedPrice} en el sistema y sumará $${formattedCommission} de comisión a tu deuda administrativa.`,
-      async () => {
-        try {
-          // Update Supabase to resolved_tow
-          await supabase
-            .from('emergencias_activas')
-            .update({
-              estado: 'resolved_tow'
-            })
-            .eq('id', activeTowJob.id);
-
-          setCitizenBalance(b => Math.max(0, b - activeTowJob.price));
-          setDriverDebt(d => d + commission);
-          setTowState('idle');
-          setActiveTowJob(null);
-          showMaterialAlert('✅ Concluido', 'Asistencia vial cargada a la aseguradora y acreditada con éxito.');
-
-          if (driverDebt + commission >= 20.00) {
-            triggerPush('⚠️ Cuenta Suspendida', 'Has alcanzado el límite de $20.00 de comisiones. Paga tu deuda para volver.');
-          }
-        } catch (e) {
-          console.error("Error finalizing tow job in DB:", e);
-        }
+      const citizenId = emer?.ciudadano_id;
+      if (!citizenId) {
+        showMaterialAlert('⚠️ Error de Transacción', 'No se ha encontrado el identificador del ciudadano asociado a este servicio.');
+        return;
       }
-    );
+
+      // 2. Fetch the citizen's real selected vehicle from Supabase
+      const { data: citizenUser } = await supabase
+        .from('usuarios')
+        .select('tipo_vehiculo, vehicle_selection')
+        .eq('auth_id', citizenId)
+        .maybeSingle();
+
+      const vType = citizenUser?.vehicle_selection || citizenUser?.tipo_vehiculo || 'coche';
+
+      // 3. Calculate distance price dynamically using distance
+      const distanceInKm = activeTowJob.distance / 1000 || 3.45;
+      const baseFee = vType === 'coche' ? 20.00 : 12.00;
+      const kmRate = vType === 'coche' ? 3.50 : 2.00;
+      const calculatedPrice = baseFee + distanceInKm * kmRate;
+
+      const driverReceives = calculatedPrice * 0.80;
+      const platformFee = calculatedPrice * 0.20;
+
+      showMaterialConfirm(
+        '🚜 Finalizar Remolque',
+        `¿Confirmas el traslado exitoso del siniestro del asegurado?\n\n` +
+        `• Perfil vehículo leído: ${vType === 'coche' ? '🚗 Coche' : '🏍️ Moto'}\n` +
+        `• Distancia recorrida: ${distanceInKm.toFixed(2)} Km\n` +
+        `• Tarifa total calculada: $${calculatedPrice.toFixed(2)} USD\n` +
+        `• Pago neto conductor: $${driverReceives.toFixed(2)} USD (80%)\n` +
+        `• Comisión plataforma: $${platformFee.toFixed(2)} USD (20%)`,
+        async () => {
+          try {
+            setIsAuthLoading(true);
+
+            // A. Update emergency state in DB
+            await supabase
+              .from('emergencias_activas')
+              .update({ estado: 'resolved' })
+              .eq('id', activeTowJob.id);
+
+            // B. Debit total amount from saldos
+            const { data: balanceRow } = await supabase
+              .from('saldos')
+              .select('creditos_disponibles')
+              .eq('usuario_id', citizenId)
+              .maybeSingle();
+
+            const newClientBal = Math.max(0, (balanceRow?.creditos_disponibles || 35.0) - calculatedPrice);
+            await supabase
+              .from('saldos')
+              .update({ creditos_disponibles: newClientBal })
+              .eq('usuario_id', citizenId);
+
+            setCitizenBalance(newClientBal);
+
+            // C. Add 80% to saldos_grueros
+            const { data: profBalRow } = await supabase
+              .from('saldos_grueros')
+              .select('balance')
+              .eq('user_id', sessionUser?.id)
+              .maybeSingle();
+
+            const newProfBal = (profBalRow?.balance || 0.00) + driverReceives;
+            await supabase
+              .from('saldos_grueros')
+              .upsert({
+                user_id: sessionUser?.id,
+                balance: newProfBal,
+                updated_at: new Date().toISOString()
+              }, { onConflict: 'user_id' });
+
+            setDriverBalance(newProfBal);
+
+            // D. Insert record into historial_comisiones
+            await supabase.from('historial_comisiones').insert({
+              servicio_id: activeTowJob.id,
+              tipo_servicio: 'grua',
+              proveedor_id: sessionUser?.id,
+              cliente_id: citizenId,
+              monto_cobrado: calculatedPrice,
+              ganancia_profesional: driverReceives,
+              comision_secureflow: platformFee
+            });
+
+            setTowState('idle');
+            setActiveTowJob(null);
+            showMaterialAlert('✅ Concluido', `Asistencia vial finalizada de forma real. Se cargaron $${calculatedPrice.toFixed(2)} USD y tus fondos de $${driverReceives.toFixed(2)} USD se acreditaron de inmediato.`);
+          } catch (e) {
+            console.error("Error running finalize tow database transaction processes:", e);
+            showMaterialAlert('❌ Error Grave', 'Error procesando transacciones reales en Supabase.');
+          } finally {
+            setIsAuthLoading(false);
+          }
+        }
+      );
+    } catch (err) {
+      console.error(err);
+      showMaterialAlert('❌ Error de Lectura', 'No se pudo conectar con la base de datos para calcular la tarifa.');
+    }
+  };
+
+  // Complete ambulance job & updates paramedic balance (DB Synced & Real Transactions)
+  const handleFinalizeAmbulanceJob = async () => {
+    if (!activeAmbulanceJob) return;
+
+    try {
+      // 1. Fetch emergency details from emergencias_activas to get the real citizen_id
+      const { data: emer } = await supabase
+        .from('emergencias_activas')
+        .select('*')
+        .eq('id', activeAmbulanceJob.id)
+        .maybeSingle();
+
+      const citizenId = emer?.ciudadano_id;
+      if (!citizenId) {
+        showMaterialAlert('⚠️ Error de Transacción', 'No se ha encontrado el identificador del ciudadano asociado a este servicio.');
+        return;
+      }
+
+      // 2. Fetch the citizen's real selected vehicle from Supabase
+      const { data: citizenUser } = await supabase
+        .from('usuarios')
+        .select('tipo_vehiculo, vehicle_selection')
+        .eq('auth_id', citizenId)
+        .maybeSingle();
+
+      const vType = citizenUser?.vehicle_selection || citizenUser?.tipo_vehiculo || 'coche';
+
+      // 3. Calculate distance price dynamically using distance of dispatch
+      const distanceInKm = activeAmbulanceJob.distance / 1000 || 2.1;
+      const baseFee = vType === 'coche' ? 30.00 : 20.00;
+      const kmRate = vType === 'coche' ? 5.00 : 3.00;
+      const calculatedPrice = baseFee + distanceInKm * kmRate;
+
+      const driverReceives = calculatedPrice * 0.80;
+      const platformFee = calculatedPrice * 0.20;
+
+      showMaterialConfirm(
+        '🚑 Finalizar Despacho Clínico',
+        `¿Confirmas la entrega exitosa del asegurado en la sala clínica?\n\n` +
+        `• Perfil vehículo leído: ${vType === 'coche' ? '🚗 Coche' : '🏍️ Moto'}\n` +
+        `• Distancia recorrida: ${distanceInKm.toFixed(2)} Km\n` +
+        `• Tarifa total calculada: $${calculatedPrice.toFixed(2)} USD\n` +
+        `• Pago neto paramédico: $${driverReceives.toFixed(2)} USD (80%)\n` +
+        `• Comisión plataforma: $${platformFee.toFixed(2)} USD (20%)`,
+        async () => {
+          try {
+            setIsAuthLoading(true);
+
+            // A. Update emergency state in DB
+            await supabase
+              .from('emergencias_activas')
+              .update({ estado: 'resolved' })
+              .eq('id', activeAmbulanceJob.id);
+
+            // B. Debit total amount from saldos
+            const { data: balanceRow } = await supabase
+              .from('saldos')
+              .select('creditos_disponibles')
+              .eq('usuario_id', citizenId)
+              .maybeSingle();
+
+            const newClientBal = Math.max(0, (balanceRow?.creditos_disponibles || 35.0) - calculatedPrice);
+            await supabase
+              .from('saldos')
+              .update({ creditos_disponibles: newClientBal })
+              .eq('usuario_id', citizenId);
+
+            setCitizenBalance(newClientBal);
+
+            // C. Add 80% to saldos_ambulancias
+            const { data: profBalRow } = await supabase
+              .from('saldos_ambulancias')
+              .select('balance')
+              .eq('user_id', sessionUser?.id)
+              .maybeSingle();
+
+            const newProfBal = (profBalRow?.balance || 0.00) + driverReceives;
+            await supabase
+              .from('saldos_ambulancias')
+              .upsert({
+                user_id: sessionUser?.id,
+                balance: newProfBal,
+                updated_at: new Date().toISOString()
+              }, { onConflict: 'user_id' });
+
+            setAmbulanceBalanceClean(newProfBal);
+
+            // D. Insert record into historial_comisiones
+            await supabase.from('historial_comisiones').insert({
+              servicio_id: activeAmbulanceJob.id,
+              tipo_servicio: 'ambulancia',
+              proveedor_id: sessionUser?.id,
+              cliente_id: citizenId,
+              monto_cobrado: calculatedPrice,
+              ganancia_profesional: driverReceives,
+              comision_secureflow: platformFee
+            });
+
+            setAmbulanceState('idle');
+            setActiveAmbulanceJob(null);
+            showMaterialAlert('✅ Concluido', `Traslado completado de forma real. Se cargaron $${calculatedPrice.toFixed(2)} USD de la cuenta de seguro del afiliado.`);
+          } catch (e) {
+            console.error("Error running finalize ambulance database processes:", e);
+            showMaterialAlert('❌ Error Grave', 'Error procesando transacciones reales en Supabase.');
+          } finally {
+            setIsAuthLoading(false);
+          }
+        }
+      );
+    } catch (err) {
+      console.error(err);
+      showMaterialAlert('❌ Error de Lectura', 'No se pudo conectar con la base de datos para calcular la tarifa.');
+    }
   };
 
   // Settle driver debt
@@ -2417,17 +2789,58 @@ export default function App() {
                             )}
 
                             {selectRole === 'citizen' && (
-                              <div className="animate-fade-in space-y-1">
-                                <label className="text-[10px] text-indigo-400 font-extrabold uppercase flex items-center gap-1 mb-1">
-                                  <span>👤 ID de Ciudadano / Cédula</span>
-                                </label>
-                                <input 
-                                  type="text" 
-                                  value={ciudadanoIdField}
-                                  onChange={(e) => setCiudadanoIdField(e.target.value)}
-                                  placeholder="Ej: C.I. V-12.345.678"
-                                  className="w-full bg-immersive-dark border border-indigo-500/30 rounded-xl px-3 py-2 text-xs text-indigo-200 focus:outline-none focus:border-indigo-400"
-                                />
+                              <div className="animate-fade-in space-y-3.5">
+                                <div className="space-y-1">
+                                  <label className="text-[10px] text-indigo-400 font-extrabold uppercase flex items-center gap-1 mb-1">
+                                    <span>👤 ID de Ciudadano / Cédula</span>
+                                  </label>
+                                  <input 
+                                    type="text" 
+                                    value={ciudadanoIdField}
+                                    onChange={(e) => setCiudadanoIdField(e.target.value)}
+                                    placeholder="Ej: C.I. V-12.345.678"
+                                    className="w-full bg-immersive-dark border border-indigo-500/30 rounded-xl px-3 py-2 text-xs text-indigo-200 focus:outline-none focus:border-indigo-400"
+                                  />
+                                </div>
+
+                                <div className="space-y-1.5">
+                                  <label className="text-[10px] text-indigo-400 font-extrabold uppercase block mb-1">
+                                    🏍️/🚗 Tipo de Vehículo Primario
+                                  </label>
+                                  <p className="text-[9px] text-slate-500 leading-normal mb-1.5">
+                                    Esto definirá el costo base y tarifas por kilómetro sincronizadas para grúas y servicios médicos.
+                                  </p>
+                                  <div className="flex gap-2">
+                                    <button
+                                      type="button"
+                                      onClick={() => {
+                                        setCitizenVehicleType('coche');
+                                        localStorage.setItem('secureflow_vehicle_type', 'coche');
+                                      }}
+                                      className={`flex-1 py-2 px-3 rounded-xl border text-center font-bold text-xs flex items-center justify-center gap-1.5 transition-all ${
+                                        citizenVehicleType === 'coche'
+                                          ? 'bg-blue-600/20 border-blue-500 text-blue-400 shadow-lg shadow-blue-500/5'
+                                          : 'bg-black/40 border-slate-800 text-slate-500 hover:text-slate-400'
+                                      }`}
+                                    >
+                                      <span>🚗 Automóvil / Coche</span>
+                                    </button>
+                                    <button
+                                      type="button"
+                                      onClick={() => {
+                                        setCitizenVehicleType('moto');
+                                        localStorage.setItem('secureflow_vehicle_type', 'moto');
+                                      }}
+                                      className={`flex-1 py-2 px-3 rounded-xl border text-center font-bold text-xs flex items-center justify-center gap-1.5 transition-all ${
+                                        citizenVehicleType === 'moto'
+                                          ? 'bg-blue-600/20 border-blue-500 text-blue-400 shadow-lg shadow-blue-500/5'
+                                          : 'bg-black/40 border-slate-800 text-slate-500 hover:text-slate-400'
+                                      }`}
+                                    >
+                                      <span>🏍️ Motocicleta / Moto</span>
+                                    </button>
+                                  </div>
+                                </div>
                               </div>
                             )}
 
@@ -2706,12 +3119,32 @@ export default function App() {
                         )}
 
                         {towState === 'dispatched' && activeTowJob && (
-                          <div className="p-3 bg-indigo-950/40 border border-indigo-800/40 rounded-2xl space-y-2">
+                          <div className="p-3 bg-indigo-950/40 border border-indigo-800/40 rounded-2xl space-y-2.5">
                             <div className="flex justify-between items-center">
-                              <span className="text-[10px] font-bold text-indicator animate-pulse text-indigo-400">🚜 ASISTENCIA EN CURSO</span>
+                              <span className="text-[10px] font-bold text-indicator animate-pulse text-indigo-400 font-mono">🚜 GRÚA EN RUTA</span>
                               <span className="text-[10px] bg-immersive-card text-indigo-300 px-2 py-0.5 rounded border border-white/5 font-mono">
                                 ETA • {Math.ceil(activeTowJob.distance / 150)} min
                               </span>
+                            </div>
+
+                            {/* Transparent Pricing Split Details */}
+                            <div className="bg-slate-900 rounded-xl p-2.5 border border-indigo-500/15 text-[10px] space-y-1.5 font-mono">
+                              <div className="flex justify-between text-slate-400 border-b border-white/5 pb-1">
+                                <span>Vehículo Configurado:</span>
+                                <span className="text-white font-sans">{citizenVehicleType === 'coche' ? '🚗 Automóvil / Coche' : '🏍️ Motocicleta / Moto'}</span>
+                              </div>
+                              <div className="flex justify-between text-red-400">
+                                <span>Debitado de tu cuenta:</span>
+                                <strong>- $ {activeTowJob.price.toFixed(2)} USD</strong>
+                              </div>
+                              <div className="flex justify-between text-green-400">
+                                <span>Acreditado al chofer (Neto 80%):</span>
+                                <strong>+ $ {(activeTowJob.price * 0.8).toFixed(2)} USD</strong>
+                              </div>
+                              <div className="flex justify-between text-slate-500">
+                                <span>Fondo Operaciones (20%):</span>
+                                <span>$ {(activeTowJob.price * 0.2).toFixed(2)} USD</span>
+                              </div>
                             </div>
 
                             {/* Simulated moving vector map */}
@@ -2748,20 +3181,11 @@ export default function App() {
 
                             <button 
                               onClick={() => {
-                                setDialog({
-                                  visible: true,
-                                  title: '💬 Chat con Gruero',
-                                  message: 'Usa la pestaña inferior u abre el chat para comunicarte directamente.',
-                                  confirmText: 'Ver Chat',
-                                  onConfirm: () => {
-                                    setCitizenTab('agent');
-                                    setDialog(null);
-                                  }
-                                });
+                                setCitizenTab('agent');
                               }}
-                              className="w-full bg-indigo-600/30 text-indigo-300 py-1.5 rounded-xl text-[10px] font-bold border border-indigo-800 hover:bg-indigo-600/40 transition-all"
+                              className="w-full bg-indigo-600 hover:bg-indigo-500 text-white py-1.5 rounded-xl text-[10px] font-bold transition-all text-center uppercase shadow"
                             >
-                              Mensajear con Chofer de Grúa
+                              💬 Abrir Chat Directo con Chofer
                             </button>
                           </div>
                         )}
@@ -2853,7 +3277,6 @@ export default function App() {
                             >
                               <span className="text-lg block mb-1">🚑</span>
                               <span className="text-xs font-bold block">Pedir Ambulancia</span>
-                              <span className="text-[9px] text-red-500/80 block mt-0.5">Soporte Médico Crítico</span>
                             </button>
 
                             <button 
@@ -2862,7 +3285,6 @@ export default function App() {
                             >
                               <span className="text-lg block mb-1">🏥</span>
                               <span className="text-xs font-bold block">Médico Guardia</span>
-                              <span className="text-[9px] text-emerald-500/80 block mt-0.5">Consulta Médica Express</span>
                             </button>
 
                             <button 
@@ -2874,7 +3296,6 @@ export default function App() {
                             >
                               <span className="text-lg block mb-1">📍</span>
                               <span className="text-xs font-bold block">GPS Preciso</span>
-                              <span className="text-[9px] text-slate-400 block mt-0.5 font-mono">Precisión: 4m (Verificada)</span>
                             </button>
 
                             <button 
@@ -2883,7 +3304,6 @@ export default function App() {
                             >
                               <span className="text-lg block mb-1">🚜</span>
                               <span className="text-xs font-bold block">Pedir Grúa</span>
-                              <span className="text-[9px] text-yellow-500/80 block mt-0.5 font-mono">Asistencia Vial Express</span>
                             </button>
                           </div>
                         </div>
@@ -2904,6 +3324,53 @@ export default function App() {
                     {/* TAB CITIZEN AI AGENT & CHATS */}
                     {citizenTab === 'agent' && (
                       <div className="flex flex-col h-full bg-slate-950">
+                        {/* Daily.co Call container when SOS is Active */}
+                        {isLawyerDailyCoActive && (
+                          <div className="bg-slate-900 border-b border-indigo-500/10 flex flex-col shrink-0">
+                            <div className="bg-red-950/40 px-3 py-2 border-b border-red-900/10 flex justify-between items-center text-[10px]">
+                              <span className="text-red-400 font-extrabold flex items-center gap-1.5 uppercase">
+                                <span className="w-1.5 h-1.5 bg-red-500 rounded-full animate-ping" />
+                                Videodefensa SOS Activa (WebRTC)
+                              </span>
+                              <span className="text-slate-400 font-mono text-[9px]">
+                                Defensor Guard: Dra. María Mendoza
+                              </span>
+                            </div>
+                            
+                            {/* Interactive daily.co iframe for client */}
+                            <div className="h-44 bg-slate-950 relative">
+                              <iframe 
+                                src={activeEmergency?.dailyRoomUrl || "https://iframe.daily.co/secureflow-abogado-defensa"}
+                                allow="camera; microphone; fullscreen"
+                                className="w-full h-full border-0"
+                                title="Daily.co Lawyer SOS"
+                              />
+                              <div className="absolute top-2 left-2 bg-black/75 px-2 py-0.5 rounded text-[8px] text-red-400 font-mono tracking-wider pointer-events-none z-10 border border-white/5 uppercase">
+                                GRABACIÓN Y AMPARO RESPALDADO EN NUBE
+                              </div>
+                            </div>
+                            
+                            <div className="p-2 bg-slate-900/90 flex justify-between items-center border-t border-white/5">
+                              <p className="text-[9px] text-slate-400">La llamada se graba como defensa judicial.</p>
+                              <button 
+                                onClick={() => {
+                                  setIsLawyerDailyCoActive(false);
+                                  setIsLiveVideoActive(false);
+                                  // Add system message to the chat!
+                                  setAgentMessages(m => [...m, {
+                                    sender: 'bot',
+                                    text: '⚖️ **Dra. María Mendoza (Abogado COPP):** Sesión WebRTC SOS terminada. Mantengo este canal de chat directo abierto 24/7 para el procedimiento.',
+                                    time: new Date().toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' })
+                                  }]);
+                                }}
+                                className="px-3 py-1 bg-red-650 hover:bg-red-700 text-white font-black text-[9px] uppercase rounded-lg shadow-lg"
+                              >
+                                Finalizar Llamada
+                              </button>
+                            </div>
+                          </div>
+                        )}
+
                         {/* Messages Area */}
                         <div ref={agentScrollRef} className="flex-1 p-3 space-y-3 overflow-y-auto max-h-[340px] scrollbar-thin">
                           
@@ -3085,6 +3552,63 @@ export default function App() {
                           </div>
                         </div>
 
+                        {/* Vehicle Configuration Panel */}
+                        <div className="p-4 bg-slate-900 border border-slate-800 rounded-2xl space-y-3">
+                          <span className="text-xs font-bold text-slate-300 block">Tipo de Vehículo (Tarificación Vial)</span>
+                          <p className="text-[10px] text-slate-500 leading-normal">
+                            Determina las tarifas estimadas por kilómetro para los servicios de grúa e intervenciones de ambulancia de guardia.
+                          </p>
+                          <div className="flex gap-2">
+                            <button 
+                              onClick={() => {
+                                setCitizenVehicleType('coche');
+                                localStorage.setItem('secureflow_vehicle_type', 'coche');
+                                triggerPush('🚗 Vehículo Actualizado', 'Tarifas configuradas para versión Automóvil/Coche.');
+                                if (sessionUser) {
+                                  supabase.from('usuarios')
+                                    .update({ tipo_vehiculo: 'coche', vehicle_selection: 'coche' })
+                                    .eq('auth_id', sessionUser.id)
+                                    .then(({ error }) => {
+                                      if (error) console.error("Error actualizando vehicle_selection en Supabase:", error);
+                                    });
+                                }
+                              }}
+                              className={`flex-1 p-2.5 rounded-xl border text-center font-bold text-xs flex flex-col items-center gap-1 transition-all ${
+                                citizenVehicleType === 'coche' 
+                                  ? 'bg-blue-600/20 border-blue-500 text-blue-450' 
+                                  : 'bg-slate-950 border-slate-850 text-slate-500 hover:text-slate-400'
+                              }`}
+                            >
+                              <span className="text-lg">🚗</span>
+                              <span>Automóvil / Coche</span>
+                            </button>
+
+                            <button 
+                              onClick={() => {
+                                setCitizenVehicleType('moto');
+                                localStorage.setItem('secureflow_vehicle_type', 'moto');
+                                triggerPush('🏍️ Vehículo Actualizado', 'Tarifas configuradas para versión Motocicleta/Moto.');
+                                if (sessionUser) {
+                                  supabase.from('usuarios')
+                                    .update({ tipo_vehiculo: 'moto', vehicle_selection: 'moto' })
+                                    .eq('auth_id', sessionUser.id)
+                                    .then(({ error }) => {
+                                      if (error) console.error("Error actualizando vehicle_selection en Supabase:", error);
+                                    });
+                                }
+                              }}
+                              className={`flex-1 p-2.5 rounded-xl border text-center font-bold text-xs flex flex-col items-center gap-1 transition-all ${
+                                citizenVehicleType === 'moto' 
+                                  ? 'bg-blue-600/20 border-blue-500 text-blue-450' 
+                                  : 'bg-slate-950 border-slate-850 text-slate-500 hover:text-slate-400'
+                              }`}
+                            >
+                              <span className="text-lg">🏍️</span>
+                              <span>Motocicleta / Moto</span>
+                            </button>
+                          </div>
+                        </div>
+
                         {/* Edit contacts container */}
                         <div className="p-4 bg-slate-900/50 rounded-2xl border border-slate-800 space-y-3">
                           <span className="text-xs font-bold text-white block">Contactos de Alerta SOS</span>
@@ -3232,6 +3756,31 @@ export default function App() {
                         </div>
                       ) : (
                         <div className="flex-1 flex flex-col justify-stretch overflow-hidden">
+                          {/* Transparent Pricing Split Details for Ambulance */}
+                          <div className="bg-slate-900 border-b border-white/5 p-3 flex flex-col space-y-2 shrink-0">
+                            <div className="flex justify-between items-center">
+                              <span className="text-[10px] font-bold text-indicator animate-pulse text-red-100 font-mono">🚑 DETALLE DE TRANSFERENCIA S.O.S</span>
+                              <span className="text-[10px] bg-red-500/10 text-red-300 border border-red-500/20 px-2 py-0.5 rounded-md font-mono">
+                                {citizenVehicleType === 'coche' ? '🚗 Automóvil' : '🏍️ Motocicleta'} Asignado
+                              </span>
+                            </div>
+
+                            <div className="bg-slate-950 rounded-xl p-2.5 border border-red-500/15 text-[10px] space-y-1.5 font-mono">
+                              <div className="flex justify-between text-red-400">
+                                <span>Debitado de tu cuenta:</span>
+                                <strong>- $ {activeAmbulanceJob ? activeAmbulanceJob.price.toFixed(2) : '35.00'} USD</strong>
+                              </div>
+                              <div className="flex justify-between text-green-400">
+                                <span>Acreditado al paramédico (80%):</span>
+                                <strong>+ $ {activeAmbulanceJob ? (activeAmbulanceJob.price * 0.8).toFixed(2) : '28.00'} USD</strong>
+                              </div>
+                              <div className="flex justify-between text-slate-500">
+                                <span>Plataforma SecureFlow (20%):</span>
+                                <span>$ {activeAmbulanceJob ? (activeAmbulanceJob.price * 0.2).toFixed(2) : '7.00'} USD</span>
+                              </div>
+                            </div>
+                          </div>
+
                           {/* 1. Real-time GPS Route Tracing Map */}
                           <div className="h-44 bg-slate-950 border-b border-white/5 relative overflow-hidden shrink-0">
                             {/* Grid paper mockup */}
@@ -3642,12 +4191,16 @@ export default function App() {
                               <span className="text-[10px] text-white font-mono">$ {proposedTariff.toFixed(2)}</span>
                             </div>
 
-                            {/* Stream representation */}
-                            <div className="h-32 bg-black rounded-2xl relative overflow-hidden flex items-center justify-center">
-                              <span className="text-6xl opacity-25">👮🏻‍♂️</span>
-                              <div className="absolute inset-0 bg-gradient-to-t from-slate-950/80 to-transparent flex flex-col justify-between p-3 text-[10px] text-slate-400">
-                                <span>Canal de Video Seguro Directo</span>
-                                <span className="text-white font-bold block">Asegurado: {activeEmergency.citizenName}</span>
+                            {/* Stream representation via Daily.co WebRTC room */}
+                            <div className="h-48 bg-black border border-white/5 rounded-2xl relative overflow-hidden">
+                              <iframe 
+                                src={activeEmergency?.dailyRoomUrl || "https://iframe.daily.co/secureflow-abogado-defensa"}
+                                allow="camera; microphone; fullscreen"
+                                className="w-full h-full border-0"
+                                title="Daily.co Lawyer WebRTC Stream"
+                              />
+                              <div className="absolute top-2 left-2 bg-black/75 px-2 py-0.5 rounded text-[8px] text-red-400 font-mono tracking-wider pointer-events-none z-10 border border-white/5 uppercase">
+                                SALA ACTIVADA: {activeEmergency?.id || 'secureflow-abogado-defensa'}
                               </div>
                             </div>
 
@@ -3809,7 +4362,10 @@ export default function App() {
                     </div>
 
                     <div className="flex items-center gap-2">
-                      <span className={`text-[10px] font-bold px-2 py-0.5 rounded ${driverDebt >= 20.00 ? 'bg-red-500 text-white' : 'bg-slate-800 text-emerald-400'}`}>
+                      <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-emerald-950/60 text-emerald-400 border border-emerald-900/40">
+                        Saldo: $ {driverBalance.toFixed(2)}
+                      </span>
+                      <span className={`text-[10px] font-bold px-2 py-0.5 rounded ${driverDebt >= 20.00 ? 'bg-red-500 text-white' : 'bg-slate-800 text-slate-400'}`}>
                         Deuda: $ {driverDebt.toFixed(2)}
                       </span>
                       <button 
@@ -4185,6 +4741,9 @@ export default function App() {
                     </div>
 
                     <div className="flex items-center gap-2">
+                      <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-emerald-950/60 text-emerald-400 border border-emerald-900/40">
+                        Saldo: $ {ambulanceBalanceClean.toFixed(2)}
+                      </span>
                       <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-slate-800 text-teal-400">
                         Ambulancia: Activa
                       </span>
@@ -4343,19 +4902,7 @@ export default function App() {
                           </div>
 
                           <button 
-                            onClick={async () => {
-                              try {
-                                await supabase
-                                  .from('emergencias_activas')
-                                  .update({ estado: 'resolved' })
-                                  .eq('id', activeAmbulanceJob.id);
-                              } catch(e) {
-                                console.error(e);
-                              }
-                              setAmbulanceState('idle');
-                              setActiveAmbulanceJob(null);
-                              showMaterialAlert('🚑 Traslado Concluido', 'Paciente entregado con éxito en la sala clínica. Registro de ambulancia archivado.');
-                            }}
+                            onClick={handleFinalizeAmbulanceJob}
                             className="w-full bg-emerald-600 hover:bg-emerald-500 text-slate-950 py-2.5 rounded-2xl text-[11px] font-black uppercase text-center transition-all shadow-md"
                           >
                             MARCAR COMO ENTREGADO / TERMINADO

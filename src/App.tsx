@@ -283,6 +283,7 @@ export default function App() {
 
   const [medicMessages, setMedicMessages] = useState<Message[]>([]);
   const [medicChatInput, setMedicChatInput] = useState<string>('');
+  const [lawyerChatInput, setLawyerChatInput] = useState<string>('');
   const [isMedicCallingActive, setIsMedicCallingActive] = useState<boolean>(false);
   
   const [isDictating, setIsDictating] = useState(false);
@@ -553,6 +554,21 @@ export default function App() {
 
           const citizen_name = userData?.nombre_completo || 'Ciudadano';
           const citizen_phone = userData?.contacto_emergencia_1_telefono || '';
+          
+          let parsedMsgs: Message[] = [];
+          try {
+            if (active.sala_webrtc_url && active.sala_webrtc_url.startsWith('{')) {
+              const meta = JSON.parse(active.sala_webrtc_url);
+              if (meta.messages) {
+                parsedMsgs = meta.messages;
+              }
+            }
+          } catch(e) {
+            console.error(e);
+          }
+
+          setAgentMessages(parsedMsgs);
+
           setActiveEmergency({
             id: active.id,
             citizenName: citizen_name,
@@ -621,6 +637,160 @@ export default function App() {
       supabase.removeChannel(channel);
     };
   }, [activeDevice, activeTowJob?.id]);
+
+  // Real-time listener for the citizen to sync the lawyer/SOS call status and chat messages from Supabase
+  useEffect(() => {
+    if (activeDevice !== 'citizen' || !activeEmergency) return;
+
+    const channel = supabase
+      .channel(`citizen-lawyer-${activeEmergency.id}`)
+      .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'emergencias_activas', filter: `id=eq.${activeEmergency.id}` }, (payload) => {
+        const updated = payload.new;
+        if (updated.estado === 'active') {
+          setSosState('active');
+          setIsLiveVideoActive(true);
+          setIsLawyerDailyCoActive(true);
+          
+          try {
+            if (updated.sala_webrtc_url && updated.sala_webrtc_url.startsWith('{')) {
+              const meta = JSON.parse(updated.sala_webrtc_url);
+              if (meta.messages) {
+                setAgentMessages(meta.messages);
+              }
+            }
+          } catch (e) {
+            console.error("Error parsing update in citizen lawyer sync:", e);
+          }
+        } else if (updated.estado === 'resolved') {
+          setIsLiveVideoActive(false);
+          setSosState('idle');
+          setActiveEmergency(null);
+          const rate = Number(updated.tarifa_aplicada) || 30.00;
+          setCitizenBalance(b => Math.max(0, b - rate));
+          showMaterialAlert('⚖️ Amparo Concluido', `Procedimiento terminado con éxito. Se debitaron $${rate} USD por asistencia legal certificada.`);
+          channel.unsubscribe();
+        } else {
+          try {
+            if (updated.sala_webrtc_url && updated.sala_webrtc_url.startsWith('{')) {
+              const meta = JSON.parse(updated.sala_webrtc_url);
+              if (meta.messages) {
+                setAgentMessages(meta.messages);
+              }
+            }
+          } catch(e) {
+            console.error(e);
+          }
+        }
+      })
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [activeDevice, activeEmergency?.id]);
+
+  // Real-time listener for the citizen to sync the doctor teleconsultation status and chat messages
+  useEffect(() => {
+    if (activeDevice !== 'citizen' || !activeMedicEmergency) return;
+
+    const channel = supabase
+      .channel(`citizen-medic-${activeMedicEmergency.id}`)
+      .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'emergencias_activas', filter: `id=eq.${activeMedicEmergency.id}` }, (payload) => {
+        const updated = payload.new;
+        if (updated.estado === 'active_medic') {
+          setMedicState('active');
+          setIsMedicWindowOpen(true);
+          setIsMedicDailyCoActive(true);
+          triggerPush('🏥 Doctor Conectado', 'El médico de guardia ha aceptado tu caso y ya está conectado.');
+          
+          try {
+            if (updated.sala_webrtc_url && updated.sala_webrtc_url.startsWith('{')) {
+              const meta = JSON.parse(updated.sala_webrtc_url);
+              if (meta.messages) {
+                setMedicMessages(meta.messages);
+              }
+            }
+          } catch(e) {
+            console.error(e);
+          }
+        } else if (updated.estado === 'resolved') {
+          setMedicState('idle');
+          setActiveMedicEmergency(null);
+          setIsMedicWindowOpen(false);
+          const rate = Number(updated.tarifa_aplicada) || 20.00;
+          setCitizenBalance(b => Math.max(0, b - rate));
+          showMaterialAlert('🩺 Consulta Concluida', 'El médico de guardia ha finalizado la sesión de teleconsulta.');
+          channel.unsubscribe();
+        } else {
+          try {
+            if (updated.sala_webrtc_url && updated.sala_webrtc_url.startsWith('{')) {
+              const meta = JSON.parse(updated.sala_webrtc_url);
+              if (meta.messages) {
+                setMedicMessages(meta.messages);
+              }
+            }
+          } catch(e) {
+            console.error(e);
+          }
+        }
+      })
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [activeDevice, activeMedicEmergency?.id]);
+
+  // Real-time listener for the citizen to sync the ambulance dispatch status and chat messages
+  useEffect(() => {
+    if (activeDevice !== 'citizen' || !activeAmbulanceJob) return;
+
+    const channel = supabase
+      .channel(`citizen-ambulance-${activeAmbulanceJob.id}`)
+      .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'emergencias_activas', filter: `id=eq.${activeAmbulanceJob.id}` }, (payload) => {
+        const updated = payload.new;
+        if (updated.estado === 'active_ambulance') {
+          setAmbulanceState('dispatched');
+          setIsAmbulanceWindowOpen(true);
+          triggerPush('🚑 Auxilio en Camino', 'La unidad de paramédicos de resguardo ha iniciado ruta oficial hacia tu ubicación.');
+          
+          try {
+            if (updated.sala_webrtc_url && updated.sala_webrtc_url.startsWith('{')) {
+              const meta = JSON.parse(updated.sala_webrtc_url);
+              if (meta.messages) {
+                setAmbulanceMessages(meta.messages);
+              }
+            }
+          } catch(e) {
+            console.error(e);
+          }
+        } else if (updated.estado === 'resolved') {
+          setAmbulanceState('idle');
+          setActiveAmbulanceJob(null);
+          setIsAmbulanceWindowOpen(false);
+          const rate = Number(updated.tarifa_aplicada) || 35.00;
+          setCitizenBalance(b => Math.max(0, b - rate));
+          showMaterialAlert('🚑 Traslado Concluido', 'La ambulancia ha finalizado el caso.');
+          channel.unsubscribe();
+        } else {
+          try {
+            if (updated.sala_webrtc_url && updated.sala_webrtc_url.startsWith('{')) {
+              const meta = JSON.parse(updated.sala_webrtc_url);
+              if (meta.messages) {
+                setAmbulanceMessages(meta.messages);
+              }
+            }
+          } catch(e) {
+            console.error(e);
+          }
+        }
+      })
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [activeDevice, activeAmbulanceJob?.id]);
 
   // Real-time listener for tow truck drivers to receive crane requests and sync chat messages
   useEffect(() => {
@@ -1117,29 +1287,39 @@ export default function App() {
     if (!text) return;
 
     const currentMsgTime = new Date().toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' });
-    const newMsgs = [...agentMessages, { sender: 'user' as const, text, time: currentMsgTime }];
-    setAgentMessages(newMsgs);
+    const newMsg = { sender: 'user' as const, text, time: currentMsgTime };
     setAgentInput('');
-    setIsIAPending(true);
 
-    if (sosState === 'active' || isLawyerDailyCoActive || activeEmergency) {
-      setTimeout(() => {
-        let lawyerReply = "Entendido, estoy al tanto de tu situación y resguardando toda tu telemetría legal. Cuéntame si hay algún oficial o funcionario militar intentando retener tu vehículo o documento.";
-        const lowerText = text.toLowerCase();
-        if (lowerText.includes('alcabala') || lowerText.includes('policia') || lowerText.includes('reten') || lowerText.includes('militar')) {
-          lawyerReply = "Nuestra legislación (Art. 68 de la CRBV) te ampara plenamente para registrar el procedimiento. Procede con cautela, mantén el altavoz y diles que tu abogado de SecureFlow está conectado en vivo de inmediato.";
-        } else if (lowerText.includes('gracia') || lowerText.includes('gracias') || lowerText.includes('ok') || lowerText.includes('perfecto')) {
-          lawyerReply = "De nada. Como tu defensor asignado, estoy listo para iniciar el reclamo judicial o administrativo si existe abuso. Mantente firme.";
+    if (activeEmergency) {
+      try {
+        const { data: row } = await supabase
+          .from('emergencias_activas')
+          .select('sala_webrtc_url')
+          .eq('id', activeEmergency.id)
+          .single();
+
+        let meta: any = {};
+        if (row?.sala_webrtc_url && row.sala_webrtc_url.startsWith('{')) {
+          meta = JSON.parse(row.sala_webrtc_url);
         }
-        setAgentMessages(m => [...m, { 
-          sender: 'bot', 
-          text: `⚖️ **Dra. María Mendoza:** ${lawyerReply}`, 
-          time: new Date().toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' }) 
-        }]);
-        setIsIAPending(false);
-      }, 1000);
+
+        const updatedMsgs = [...(meta.messages || []), newMsg];
+        meta.messages = updatedMsgs;
+
+        await supabase
+          .from('emergencias_activas')
+          .update({ sala_webrtc_url: JSON.stringify(meta) })
+          .eq('id', activeEmergency.id);
+
+        setAgentMessages(updatedMsgs);
+      } catch (e) {
+        console.error("Error sending synchronized lawyer chat message:", e);
+        setAgentMessages(m => [...m, newMsg]);
+      }
       return;
     }
+
+    setIsIAPending(true);
 
     // Check Plan limitations
     const maxConsults = activePlan === 'gratis' ? 5 : activePlan === 'estandar' ? 20 : 99999;
@@ -1323,12 +1503,12 @@ export default function App() {
       return;
     }
 
-    setSosState('active'); // Directly activate the state
-    setIsLiveVideoActive(true);
-    setIsLawyerDailyCoActive(true); // Automatically connect Daily.co
-    setCitizenTab('agent'); // Automatically open chat Tab
+    setSosState('calling');
+    setIsLiveVideoActive(false);
+    setIsLawyerDailyCoActive(false);
+    setCitizenTab('home');
     setVideoStreamType('rear');
-    triggerPush('🚨 Llamada SOS Iniciada', 'Conectando con la sala de defensa penal y amparo de guardia...');
+    triggerPush('🚨 Llamada SOS Iniciada', 'Conectando con la sala de defensa penal... Buscando abogado de guardia en línea.');
     
     const emerId = Math.random().toString(36).substr(2, 6).toUpperCase();
     const dailyUrlGenerated = `https://iframe.daily.co/secureflow-abogado-${emerId.toLowerCase()}`;
@@ -1337,7 +1517,7 @@ export default function App() {
       citizenName: citizenProfile.name,
       citizenPhone: citizenProfile.phone,
       citizenCity: citizenProfile.city,
-      status: 'active', // Active immediately
+      status: 'calling',
       latitude: citizenCoords.lat,
       longitude: citizenCoords.lng,
       tarifa: sosCostRate,
@@ -1380,8 +1560,12 @@ export default function App() {
       await supabase.from('emergencias_activas').insert({
         id: emerId,
         ciudadano_id: sessionUser?.id || null,
-        sala_webrtc_url: `https://secure.secureflow.ve/room/${emerId}`,
-        estado: 'active',
+        sala_webrtc_url: JSON.stringify({
+          citizenName: citizenProfile.name,
+          citizenPhone: citizenProfile.phone,
+          messages: []
+        }),
+        estado: 'calling',
         ubicacion_texto: citizenProfile.city,
         ubicacion_lat: citizenCoords.lat,
         ubicacion_lng: citizenCoords.lng,
@@ -1397,30 +1581,6 @@ export default function App() {
     } catch (e) {
       console.error('Error inserting emergency row: ', e);
     }
-
-    // Subscribe to real-time changes of this specific emergency
-    const channel = supabase
-      .channel(`emer-${emerId}`)
-      .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'emergencias_activas', filter: `id=eq.${emerId}` }, (payload) => {
-        const updated = payload.new;
-        if (updated.estado === 'active') {
-          setSosState('active');
-          setIsLiveVideoActive(true);
-          setVideoStreamType('rear');
-          triggerPush('📹 Sala de Defensa Conectada', 'El abogado asignado ya visualiza el video en directo para tu defensa legal.');
-          setActiveEmergency(prev => prev ? { ...prev, status: 'active', lawyerId: updated.abogado_asignado_id } : null);
-        } else if (updated.estado === 'resolved') {
-          setIsLiveVideoActive(false);
-          setSosState('idle');
-          setActiveEmergency(null);
-          // Decrement local/db balance
-          const rate = Number(updated.tarifa_aplicada) || sosCostRate;
-          setCitizenBalance(b => Math.max(0, b - rate));
-          showMaterialAlert('⚖️ Amparo Concluido', `Procedimiento terminado con éxito. Se debitaron $${rate} USD por asistencia legal certificada.`);
-          channel.unsubscribe();
-        }
-      })
-      .subscribe();
   };
 
   // Professional Citizen Ambulance Despatch Requesting (Insurtech Dispatcher)
@@ -1457,32 +1617,26 @@ export default function App() {
           driverReceives,
           platformFee,
           vehicleType: citizenVehicleType,
-          messages: [
-            { 
-              sender: 'driver', 
-              text: `🚑 Hola ${citizenProfile.name || 'Asegurado'}, soy el paramédico de guardia. Estamos en ruta con sirena activa y visualizando tu GPS en tiempo real. Mantén la calma. Puedes chatear conmigo por aquí.`, 
-              time: new Date().toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' }) 
-            }
-          ]
+          messages: []
         };
 
         const newJob = {
           id: emerId,
           citizenName: citizenProfile.name || 'Ciudadano',
           citizenPhone: citizenProfile.phone || 'No phone',
-          status: 'dispatched',
+          status: 'calling',
           latitude: citizenCoords.lat,
           longitude: citizenCoords.lng,
           price: estimatedPrice,
           distance: distMeters
         };
 
-        setAmbulanceState('dispatched');
+        setAmbulanceState('proposed');
         setActiveAmbulanceJob(newJob);
-        setAmbulanceMessages(initialMeta.messages);
+        setAmbulanceMessages([]);
         setAmbulanceCoords({lat: 10.4780, lng: -66.8960});
         setAmbulanceDistance(distMeters);
-        setIsAmbulanceWindowOpen(true);
+        setIsAmbulanceWindowOpen(false);
         setIsAmbulanceDailyCoActive(false);
 
         try {
@@ -1497,7 +1651,7 @@ export default function App() {
             tarifa_aplicada: estimatedPrice,
             sala_webrtc_url: JSON.stringify(initialMeta)
           });
-          triggerPush('🚑 Ambulancia Despachada', 'Unidad de cuidados de guardia avisada y saliendo...');
+          triggerPush('🚑 Ambulancia Solicitada', 'Buscando la unidad de paramédicos de guardia oficial más cercana...');
         } catch (e) {
           console.error("Error creating calling_ambulance in Supabase", e);
         }
@@ -1520,16 +1674,13 @@ export default function App() {
       `¿Deseas activar una consulta médica inmediata con el médico cirujano de guardia? Podrán chatear primero y activar videollamada si ambos están de acuerdo. Tarifa: $20.00 USD.`,
       async () => {
         setMedicState('calling');
-        setIsMedicWindowOpen(true);
+        setIsMedicWindowOpen(false);
         setIsMedicDailyCoActive(false);
         const emerId = 'MED-' + Math.random().toString(36).substr(2, 6).toUpperCase();
         
-        const initialMessages = [
-          { sender: 'driver', text: `🩺 Hola ${citizenProfile.name || 'Asegurado'}, soy el Dr. Luis Beltrán de guardia. He recibido tu requerimiento de triaje inmediato. Coméntame tus síntomas por aquí para atenderte.`, time: '19:55' }
-        ];
-        setMedicMessages(initialMessages);
+        setMedicMessages([]);
 
-        triggerPush('🏥 Conectando Médico', 'Estableciendo canal de telemedicina con el especialista de guardia...');
+        triggerPush('🏥 Buscando Médico de Guardia', 'Esperando conexión segura con el especialista de guardia...');
         
         const newEmer = {
           id: emerId,
@@ -1541,8 +1692,7 @@ export default function App() {
           longitude: citizenCoords.lng
         };
         setActiveMedicEmergency(newEmer);
-        setIsLiveVideoActive(true);
-        setVideoStreamType('front'); // Use front camera for face to face consultations
+        setIsLiveVideoActive(false);
 
         try {
           await supabase.from('emergencias_activas').insert({
@@ -1553,7 +1703,7 @@ export default function App() {
             ubicacion_lat: citizenCoords.lat,
             ubicacion_lng: citizenCoords.lng,
             tarifa_aplicada: 20.0,
-            sala_webrtc_url: JSON.stringify({ type: 'medic_video', messages: initialMessages })
+            sala_webrtc_url: JSON.stringify({ type: 'medic_video', messages: [] })
           });
           
           // Also trigger webhook for doctor emergency just in case! 
@@ -2198,47 +2348,149 @@ export default function App() {
   };
 
   // Direct sync and simulation send actions for Ambulance and Doctor
-  const handleSendAmbulanceMessage = (sender: 'user' | 'driver' | 'bot', textOverride?: string) => {
+  const handleSendAmbulanceMessage = async (sender: 'user' | 'driver' | 'bot', textOverride?: string) => {
     const text = textOverride || ambulanceChatInput.trim();
     if (!text) return;
     const timeStr = new Date().toLocaleTimeString('es-VE', { hour: '2-digit', minute: '2-digit', hour12: false });
     const newMsg = { sender, text, time: timeStr };
-    setAmbulanceMessages(prev => [...prev, newMsg]);
+
     if (!textOverride) setAmbulanceChatInput('');
 
-    if (sender === 'user') {
-      setTimeout(() => {
-        const replies = [
-          "🚑 Entendido. Estamos cruzando la autopista en este momento con sirena activa.",
-          "Copiado. Por favor mantenga la vía despejada y el teléfono a la mano.",
-          "Nuestra tripulación de paramédicos de resguardo ya tiene listos los insumos primarios.",
-          "Estamos a 2 minutos de su ubicación. Por favor, realice señas si ve la unidad."
-        ];
-        const randomReply = replies[Math.floor(Math.random() * replies.length)];
-        setAmbulanceMessages(prev => [...prev, { sender: 'driver', text: randomReply, time: timeStr }]);
-      }, 2000);
+    if (activeAmbulanceJob) {
+      try {
+        const { data: row } = await supabase
+          .from('emergencias_activas')
+          .select('sala_webrtc_url')
+          .eq('id', activeAmbulanceJob.id)
+          .single();
+
+        let meta: any = {};
+        if (row?.sala_webrtc_url && row.sala_webrtc_url.startsWith('{')) {
+          meta = JSON.parse(row.sala_webrtc_url);
+        }
+
+        const updatedMsgs = [...(meta.messages || []), newMsg];
+        meta.messages = updatedMsgs;
+
+        await supabase
+          .from('emergencias_activas')
+          .update({
+            sala_webrtc_url: JSON.stringify(meta)
+          })
+          .eq('id', activeAmbulanceJob.id);
+
+        setAmbulanceMessages(updatedMsgs);
+      } catch (e) {
+        console.error("Error sending synchronized ambulance message:", e);
+        setAmbulanceMessages(prev => [...prev, newMsg]);
+      }
+    } else {
+      setAmbulanceMessages(prev => [...prev, newMsg]);
+
+      if (sender === 'user') {
+        setTimeout(() => {
+          const replies = [
+            "🚑 Entendido. Estamos cruzando la autopista en este momento con sirena activa.",
+            "Copiado. Por favor mantenga la vía despejada y el teléfono a la mano.",
+            "Nuestra tripulación de paramédicos de resguardo ya tiene listos los insumos primarios.",
+            "Estamos a 2 minutos de su ubicación. Por favor, realice señas si ve la unidad."
+          ];
+          const randomReply = replies[Math.floor(Math.random() * replies.length)];
+          setAmbulanceMessages(prev => [...prev, { sender: 'driver', text: randomReply, time: timeStr }]);
+        }, 2000);
+      }
     }
   };
 
-  const handleSendMedicMessage = (sender: 'user' | 'driver' | 'bot', textOverride?: string) => {
+  const handleSendMedicMessage = async (sender: 'user' | 'driver' | 'bot', textOverride?: string) => {
     const text = textOverride || medicChatInput.trim();
     if (!text) return;
     const timeStr = new Date().toLocaleTimeString('es-VE', { hour: '2-digit', minute: '2-digit', hour12: false });
     const newMsg = { sender, text, time: timeStr };
-    setMedicMessages(prev => [...prev, newMsg]);
+
     if (!textOverride) setMedicChatInput('');
 
-    if (sender === 'user') {
-      setTimeout(() => {
-        const replies = [
-          "🩺 He recibido sus datos y reporte de dolor. Por favor, mantenga reposo y respire calmadamente.",
-          "Entendido. ¿Presenta antecedentes médicos crónicos o alergia a algún analgésico?",
-          "Le sugiero registrar su pulso. Si lo desea, pulse la cámara superior para activar la videollamada y evaluarle.",
-          "Se ha notificado al área de triaje clínico de resguardo para registrar su diagnóstico."
-        ];
-        const randomReply = replies[Math.floor(Math.random() * replies.length)];
-        setMedicMessages(prev => [...prev, { sender: 'driver', text: randomReply, time: timeStr }]);
-      }, 2000);
+    if (activeMedicEmergency) {
+      try {
+        const { data: row } = await supabase
+          .from('emergencias_activas')
+          .select('sala_webrtc_url')
+          .eq('id', activeMedicEmergency.id)
+          .single();
+
+        let meta: any = {};
+        if (row?.sala_webrtc_url && row.sala_webrtc_url.startsWith('{')) {
+          meta = JSON.parse(row.sala_webrtc_url);
+        }
+
+        const updatedMsgs = [...(meta.messages || []), newMsg];
+        meta.messages = updatedMsgs;
+
+        await supabase
+          .from('emergencias_activas')
+          .update({
+            sala_webrtc_url: JSON.stringify(meta)
+          })
+          .eq('id', activeMedicEmergency.id);
+
+        setMedicMessages(updatedMsgs);
+      } catch (e) {
+        console.error("Error sending synchronized medic message:", e);
+        setMedicMessages(prev => [...prev, newMsg]);
+      }
+    } else {
+      setMedicMessages(prev => [...prev, newMsg]);
+
+      if (sender === 'user') {
+        setTimeout(() => {
+          const replies = [
+            "🩺 He recibido sus datos y reporte de dolor. Por favor, mantenga reposo y respire calmadamente.",
+            "Entendido. ¿Presenta antecedentes médicos crónicos o alergia a algún analgésico?",
+            "Le sugiero registrar su pulso. Si lo desea, pulse la cámara superior para activar la videollamada y evaluarle.",
+            "Se ha notificado al área de triaje clínico de resguardo para registrar su diagnóstico."
+          ];
+          const randomReply = replies[Math.floor(Math.random() * replies.length)];
+          setMedicMessages(prev => [...prev, { sender: 'driver', text: randomReply, time: timeStr }]);
+        }, 2000);
+      }
+    }
+  };
+
+  const handleSendLawyerMessage = async () => {
+    const text = lawyerChatInput.trim();
+    if (!text) return;
+
+    if (!activeEmergency) return;
+
+    const timeStr = new Date().toLocaleTimeString('es-VE', { hour: '2-digit', minute: '2-digit', hour12: false });
+    const newMsg: Message = { sender: 'bot', text: `⚖️ Dra. María Mendoza: ${text}`, time: timeStr };
+
+    setLawyerChatInput('');
+
+    try {
+      const { data: row } = await supabase
+        .from('emergencias_activas')
+        .select('sala_webrtc_url')
+        .eq('id', activeEmergency.id)
+        .single();
+
+      let meta: any = {};
+      if (row?.sala_webrtc_url && row.sala_webrtc_url.startsWith('{')) {
+        meta = JSON.parse(row.sala_webrtc_url);
+      }
+
+      const updatedMsgs = [...(meta.messages || []), newMsg];
+      meta.messages = updatedMsgs;
+
+      await supabase
+        .from('emergencias_activas')
+        .update({ sala_webrtc_url: JSON.stringify(meta) })
+        .eq('id', activeEmergency.id);
+
+      setAgentMessages(updatedMsgs);
+    } catch (e) {
+      console.error("Error sending lawyer response:", e);
+      setAgentMessages(m => [...m, newMsg]);
     }
   };
 
@@ -3189,6 +3441,16 @@ export default function App() {
                             </button>
                           </div>
                         )}
+
+                         {sosState === 'calling' && (
+                           <div className="p-4 bg-amber-500/10 border border-amber-500/30 rounded-2xl text-center space-y-2 animate-pulse mb-3">
+                             <span className="text-xl block animate-bounce">⚖️</span>
+                             <span className="text-xs text-amber-400 font-extrabold block uppercase">Buscando Abogado Penalista...</span>
+                             <p className="text-[10px] text-slate-300 leading-normal">
+                               Estamos enlazando tu ubicación y requerimiento SOS con la central de defensas viales en vivo. Por favor espera a que un profesional de guardia tome el control.
+                             </p>
+                           </div>
+                         )}
 
                          {/* Core Emergency SOS Glowing Button */}
                          <div className="p-5 bg-immersive-card border border-white/5 rounded-3xl text-center shadow-md relative overflow-hidden">
@@ -4201,6 +4463,52 @@ export default function App() {
                               />
                               <div className="absolute top-2 left-2 bg-black/75 px-2 py-0.5 rounded text-[8px] text-red-400 font-mono tracking-wider pointer-events-none z-10 border border-white/5 uppercase">
                                 SALA ACTIVADA: {activeEmergency?.id || 'secureflow-abogado-defensa'}
+                              </div>
+                            </div>
+
+                            {/* Live Chat & Legal Amparo log */}
+                            <div className="bg-slate-950 rounded-2xl border border-white/5 flex flex-col justify-stretch overflow-hidden">
+                              <div className="bg-slate-900 border-b border-white/5 py-1.5 px-3 flex justify-between items-center text-[9px] font-bold text-slate-400">
+                                <span className="uppercase text-indigo-400">💬 CANAL EN DIRECTO CON CIUDADANO</span>
+                                <span className="font-mono text-[8px]">ID: {activeEmergency?.id}</span>
+                              </div>
+
+                              <div className="h-44 overflow-y-auto p-3.5 space-y-2.5">
+                                {agentMessages.length === 0 ? (
+                                  <div className="text-center text-[10px] text-slate-500 py-6 italic">No hay mensajes en esta sesión aún...</div>
+                                ) : (
+                                  agentMessages.map((msg, idx) => (
+                                    <div key={idx} className={`flex flex-col ${msg.sender === 'bot' ? 'items-end' : 'items-start'}`}>
+                                      <span className="text-[8px] text-slate-500 font-mono mb-0.5">
+                                        {msg.sender === 'bot' ? 'Dra. María Mendoza (Tú)' : 'Ciudadano'} • {msg.time}
+                                      </span>
+                                      <div className={`p-2.5 rounded-2xl text-[11px] max-w-[85%] leading-relaxed ${
+                                        msg.sender === 'bot' 
+                                          ? 'bg-amber-500 text-slate-950 font-medium rounded-tr-none' 
+                                          : 'bg-slate-800 text-slate-100 rounded-tl-none border border-white/5'
+                                      }`}>
+                                        {msg.text.replace(/⚙️ Dra. María Mendoza: /, '').replace(/⚖️ Dra. María Mendoza: /, '')}
+                                      </div>
+                                    </div>
+                                  ))
+                                )}
+                              </div>
+
+                              <div className="p-2 border-t border-white/5 bg-slate-900 flex items-center gap-2">
+                                <input 
+                                  type="text"
+                                  value={lawyerChatInput}
+                                  onChange={e => setLawyerChatInput(e.target.value)}
+                                  onKeyDown={e => { if (e.key === 'Enter') handleSendLawyerMessage(); }}
+                                  placeholder="Escribe un consejo legal al ciudadano..."
+                                  className="flex-1 bg-slate-950 border border-white/5 rounded-xl px-3 py-1.5 text-xs text-white focus:outline-none focus:border-amber-500"
+                                />
+                                <button 
+                                  onClick={handleSendLawyerMessage}
+                                  className="px-3.5 py-1.5 bg-amber-500 hover:bg-amber-400 text-slate-950 font-black text-xs rounded-xl"
+                                >
+                                  Enviar
+                                </button>
                               </div>
                             </div>
 

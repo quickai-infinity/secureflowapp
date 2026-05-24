@@ -609,7 +609,7 @@ export default function App() {
       .channel(`tow-${activeTowJob.id}`)
       .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'emergencias_activas', filter: `id=eq.${activeTowJob.id}` }, (payload) => {
         const updated = payload.new;
-        if (updated.estado === 'active_tow') {
+        if (updated.estado === 'dispatched') {
           setTowState('dispatched');
           try {
             if (updated.sala_webrtc_url && updated.sala_webrtc_url.startsWith('{')) {
@@ -617,11 +617,16 @@ export default function App() {
               if (meta.messages) {
                 setTowMessages(meta.messages);
               }
+              setActiveTowJob(prev => prev ? {
+                ...prev,
+                driverName: meta.driverName || 'Asignado',
+                driverPhone: meta.driverPhone || ''
+              } : null);
             }
           } catch (e) {
             console.error("Error parsing update in citizen sync:", e);
           }
-        } else if (updated.estado === 'resolved_tow') {
+        } else if (updated.estado === 'completed') {
           // Resolved successfully
           setTowState('idle');
           setActiveTowJob(null);
@@ -661,7 +666,7 @@ export default function App() {
           } catch (e) {
             console.error("Error parsing update in citizen lawyer sync:", e);
           }
-        } else if (updated.estado === 'resolved') {
+        } else if (updated.estado === 'completed') {
           setIsLiveVideoActive(false);
           setSosState('idle');
           setActiveEmergency(null);
@@ -697,7 +702,7 @@ export default function App() {
       .channel(`citizen-medic-${activeMedicEmergency.id}`)
       .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'emergencias_activas', filter: `id=eq.${activeMedicEmergency.id}` }, (payload) => {
         const updated = payload.new;
-        if (updated.estado === 'active_medic') {
+        if (updated.estado === 'active') {
           setMedicState('active');
           setIsMedicWindowOpen(true);
           setIsMedicDailyCoActive(true);
@@ -713,7 +718,7 @@ export default function App() {
           } catch(e) {
             console.error(e);
           }
-        } else if (updated.estado === 'resolved') {
+        } else if (updated.estado === 'completed') {
           setMedicState('idle');
           setActiveMedicEmergency(null);
           setIsMedicWindowOpen(false);
@@ -749,7 +754,7 @@ export default function App() {
       .channel(`citizen-ambulance-${activeAmbulanceJob.id}`)
       .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'emergencias_activas', filter: `id=eq.${activeAmbulanceJob.id}` }, (payload) => {
         const updated = payload.new;
-        if (updated.estado === 'active_ambulance') {
+        if (updated.estado === 'dispatched') {
           setAmbulanceState('dispatched');
           setIsAmbulanceWindowOpen(true);
           triggerPush('🚑 Auxilio en Camino', 'La unidad de paramédicos de resguardo ha iniciado ruta oficial hacia tu ubicación.');
@@ -764,7 +769,7 @@ export default function App() {
           } catch(e) {
             console.error(e);
           }
-        } else if (updated.estado === 'resolved') {
+        } else if (updated.estado === 'completed') {
           setAmbulanceState('idle');
           setActiveAmbulanceJob(null);
           setIsAmbulanceWindowOpen(false);
@@ -801,7 +806,7 @@ export default function App() {
       const { data: callingData } = await supabase
         .from('emergencias_activas')
         .select('*')
-        .eq('estado', 'calling_tow');
+        .eq('estado', 'pending');
 
       if (callingData && callingData.length > 0) {
         const active = callingData[0];
@@ -843,7 +848,7 @@ export default function App() {
         const { data: activeData } = await supabase
           .from('emergencias_activas')
           .select('*')
-          .eq('estado', 'active_tow')
+          .eq('estado', 'dispatched')
           .eq('abogado_asignado_id', sessionUser.id);
 
         if (activeData && activeData.length > 0) {
@@ -944,45 +949,49 @@ export default function App() {
         return;
       }
 
-      const { data: activeData } = await supabase
-        .from('emergencias_activas')
-        .select('*')
-        .eq('estado', 'active_ambulance');
+      // 2. Fetch our currently active ongoing dispatch if assigned to us
+      if (sessionUser) {
+        const { data: activeData } = await supabase
+          .from('emergencias_activas')
+          .select('*')
+          .eq('estado', 'dispatched')
+          .eq('abogado_asignado_id', sessionUser.id);
 
-      if (activeData && activeData.length > 0) {
-        const active = activeData[0];
-        let cName = 'Ciudadano';
-        let cPhone = '';
-        let distance = 2100;
-        let msgs: Message[] = [];
-        try {
-          if (active.sala_webrtc_url && active.sala_webrtc_url.startsWith('{')) {
-            const meta = JSON.parse(active.sala_webrtc_url);
-            cName = meta.citizenName || cName;
-            cPhone = meta.citizenPhone || cPhone;
-            distance = meta.distance || distance;
-            msgs = meta.messages || msgs;
+        if (activeData && activeData.length > 0) {
+          const active = activeData[0];
+          let cName = 'Ciudadano';
+          let cPhone = '';
+          let distance = 2100;
+          let msgs: Message[] = [];
+          try {
+            if (active.sala_webrtc_url && active.sala_webrtc_url.startsWith('{')) {
+              const meta = JSON.parse(active.sala_webrtc_url);
+              cName = meta.citizenName || cName;
+              cPhone = meta.citizenPhone || cPhone;
+              distance = meta.distance || distance;
+              msgs = meta.messages || msgs;
+            }
+          } catch (e) {
+            console.warn(e);
           }
-        } catch (e) {
-          console.warn(e);
-        }
 
-        setAmbulanceState('dispatched');
-        setIsAmbulanceDailyCoActive(true);
-        setActiveAmbulanceJob({
-          id: active.id,
-          citizenName: cName,
-          citizenPhone: cPhone,
-          latitude: Number(active.ubicacion_lat),
-          longitude: Number(active.ubicacion_lng),
-          price: Number(active.tarifa_aplicada),
-          distance: distance
-        });
-        setAmbulanceMessages(msgs);
-      } else {
-        if (ambulanceState !== 'idle') {
-          setAmbulanceState('idle');
-          setActiveAmbulanceJob(null);
+          setAmbulanceState('dispatched');
+          setIsAmbulanceDailyCoActive(true);
+          setActiveAmbulanceJob({
+            id: active.id,
+            citizenName: cName,
+            citizenPhone: cPhone,
+            latitude: Number(active.ubicacion_lat),
+            longitude: Number(active.ubicacion_lng),
+            price: Number(active.tarifa_aplicada),
+            distance: distance
+          });
+          setAmbulanceMessages(msgs);
+        } else {
+          if (ambulanceState !== 'idle') {
+            setAmbulanceState('idle');
+            setActiveAmbulanceJob(null);
+          }
         }
       }
     };
@@ -1042,42 +1051,46 @@ export default function App() {
         return;
       }
 
-      const { data: activeData } = await supabase
-        .from('emergencias_activas')
-        .select('*')
-        .eq('estado', 'active_medic');
+      // 2. Fetch our currently active medical consultation if assigned to us
+      if (sessionUser) {
+        const { data: activeData } = await supabase
+          .from('emergencias_activas')
+          .select('*')
+          .eq('estado', 'active')
+          .eq('abogado_asignado_id', sessionUser.id);
 
-      if (activeData && activeData.length > 0) {
-        const active = activeData[0];
-        let cName = 'Ciudadano de Guardia';
-        let cPhone = '';
-        let msgs: Message[] = [];
-        try {
-          if (active.sala_webrtc_url && active.sala_webrtc_url.startsWith('{')) {
-            const meta = JSON.parse(active.sala_webrtc_url);
-            cName = meta.citizenName || cName;
-            cPhone = meta.citizenPhone || cPhone;
-            msgs = meta.messages || msgs;
+        if (activeData && activeData.length > 0) {
+          const active = activeData[0];
+          let cName = 'Ciudadano de Guardia';
+          let cPhone = '';
+          let msgs: Message[] = [];
+          try {
+            if (active.sala_webrtc_url && active.sala_webrtc_url.startsWith('{')) {
+              const meta = JSON.parse(active.sala_webrtc_url);
+              cName = meta.citizenName || cName;
+              cPhone = meta.citizenPhone || cPhone;
+              msgs = meta.messages || msgs;
+            }
+          } catch (e) {
+            console.warn(e);
           }
-        } catch (e) {
-          console.warn(e);
-        }
 
-        setMedicState('active');
-        setIsMedicDailyCoActive(true);
-        setActiveMedicEmergency({
-          id: active.id,
-          citizenName: cName,
-          citizenPhone: cPhone,
-          latitude: Number(active.ubicacion_lat),
-          longitude: Number(active.ubicacion_lng),
-          price: Number(active.tarifa_aplicada)
-        });
-        setMedicMessages(msgs);
-      } else {
-        if (medicState !== 'idle') {
-          setMedicState('idle');
-          setActiveMedicEmergency(null);
+          setMedicState('active');
+          setIsMedicDailyCoActive(true);
+          setActiveMedicEmergency({
+            id: active.id,
+            citizenName: cName,
+            citizenPhone: cPhone,
+            latitude: Number(active.ubicacion_lat),
+            longitude: Number(active.ubicacion_lng),
+            price: Number(active.tarifa_aplicada)
+          });
+          setMedicMessages(msgs);
+        } else {
+          if (medicState !== 'idle') {
+            setMedicState('idle');
+            setActiveMedicEmergency(null);
+          }
         }
       }
     };
@@ -2093,45 +2106,39 @@ export default function App() {
           driverReceives,
           platformFee,
           vehicleType: citizenVehicleType,
-          messages: [
-            { 
-              sender: 'driver', 
-              text: `🚨 Hola ${citizenProfile.name || 'Asegurado'}, soy el operador de grúa Carlos Ruiz. Ya voy en ruta hacia tu localización en tiempo real con mi remolque homologado para tu ${citizenVehicleType === 'coche' ? 'coche' : 'motocicleta'}. Puedes escribirme por aquí para coordinar.`, 
-              time: new Date().toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' }) 
-            }
-          ]
+          messages: []
         };
 
         const newJob: TowJob = {
           id: emerId,
           citizenName: citizenProfile.name || 'Ciudadano',
           citizenPhone: citizenProfile.phone || 'No phone',
-          status: 'active', // Transition to active immediately
+          status: 'pending',
           latitude: citizenCoords.lat,
           longitude: citizenCoords.lng,
           price: estimatedPrice,
           distance: distMeters
         };
 
-        setTowState('dispatched');
+        setTowState('proposed');
         setActiveTowJob(newJob);
-        setTowMessages(initialMeta.messages);
+        setTowMessages([]);
 
         try {
           // Insert row in Supabase so logged in drivers can receive it in real-time
           await supabase.from('emergencias_activas').insert({
             id: emerId,
             ciudadano_id: sessionUser?.id || null,
-            estado: 'calling_tow',
+            estado: 'pending',
             ubicacion_texto: citizenProfile.city || 'Caracas',
             ubicacion_lat: citizenCoords.lat,
             ubicacion_lng: citizenCoords.lng,
             tarifa_aplicada: estimatedPrice,
             sala_webrtc_url: JSON.stringify(initialMeta)
           });
-          triggerPush('🚜 Alerta Solicitud Grúa', 'Operador en camino. Se ha abierto el chat directo.');
+          triggerPush('🚜 Alerta Solicitud Grúa', 'Buscando unidad de grúa disponible en el sector...');
         } catch (e) {
-          console.error("Error creating calling_tow row in Supabase:", e);
+          console.error("Error creating pending tow row in Supabase:", e);
         }
       }
     );
@@ -2191,7 +2198,7 @@ export default function App() {
           // Resolve emergency row
           const { error: updateErr } = await supabase
             .from('emergencias_activas')
-            .update({ estado: 'resolved' })
+            .update({ estado: 'completed' })
             .eq('id', activeEmergency.id);
 
           if (updateErr) throw updateErr;
@@ -2257,22 +2264,24 @@ export default function App() {
         meta = JSON.parse(row.sala_webrtc_url);
       }
 
-      // Prepend or add first driver message
+      // Prepend or add first driver message with logged-in driver's actual registered name
       const timeStr = new Date().toLocaleTimeString('es-VE', { hour: '2-digit', minute: '2-digit', hour12: false });
       const initialDriverMsg = { 
         sender: 'driver' as const, 
-        text: `🚨 Hola ${meta.citizenName || 'Asegurado'}, soy el operador de grúa asignado. Ya voy en ruta hacia tu localización en tiempo real con mi remolque. Puedes escribirme por aquí.`, 
+        text: `🚨 Hola ${meta.citizenName || 'Asegurado'}, soy el operador de grúa ${driverProfile.name || 'Asignado'}. Ya voy en ruta hacia tu localización en tiempo real con mi remolque. Puedes escribirme por aquí.`, 
         time: timeStr 
       };
       
       const updatedMsgs = [...(meta.messages || []), initialDriverMsg];
       meta.messages = updatedMsgs;
+      meta.driverName = driverProfile.name || 'Operador Asignado';
+      meta.driverPhone = driverProfile.phone || 'No phone';
 
-      // Update Supabase to active_tow and set driver (abogado_asignado_id)
+      // Update Supabase to dispatched and set driver (abogado_asignado_id)
       await supabase
         .from('emergencias_activas')
         .update({
-          estado: 'active_tow',
+          estado: 'dispatched',
           abogado_asignado_id: sessionUser?.id || null,
           sala_webrtc_url: JSON.stringify(meta)
         })
@@ -2280,7 +2289,9 @@ export default function App() {
 
       setActiveTowJob({
         ...activeTowJob,
-        status: 'en_route'
+        status: 'en_route',
+        driverName: driverProfile.name || 'Operador Asignado',
+        driverPhone: driverProfile.phone || 'No phone'
       });
       setTowState('dispatched');
       setTowMessages(updatedMsgs);
@@ -2587,7 +2598,7 @@ export default function App() {
             // A. Update emergency state in DB
             await supabase
               .from('emergencias_activas')
-              .update({ estado: 'resolved' })
+              .update({ estado: 'completed' })
               .eq('id', activeTowJob.id);
 
             // B. Debit total amount from saldos
@@ -2702,7 +2713,7 @@ export default function App() {
             // A. Update emergency state in DB
             await supabase
               .from('emergencias_activas')
-              .update({ estado: 'resolved' })
+              .update({ estado: 'completed' })
               .eq('id', activeAmbulanceJob.id);
 
             // B. Debit total amount from saldos
@@ -5103,7 +5114,10 @@ export default function App() {
                               try {
                                 await supabase
                                   .from('emergencias_activas')
-                                  .update({ estado: 'active_ambulance' })
+                                  .update({ 
+                                    estado: 'dispatched',
+                                    abogado_asignado_id: sessionUser?.id || null
+                                  })
                                   .eq('id', activeAmbulanceJob.id);
                               } catch (e) {
                                 console.error(e);
@@ -5325,7 +5339,10 @@ export default function App() {
                               try {
                                 await supabase
                                   .from('emergencias_activas')
-                                  .update({ estado: 'active_medic' })
+                                  .update({ 
+                                    estado: 'active',
+                                    abogado_asignado_id: sessionUser?.id || null
+                                  })
                                   .eq('id', activeMedicEmergency.id);
                               } catch (e) {
                                 console.error(e);
@@ -5428,7 +5445,7 @@ export default function App() {
                               try {
                                 await supabase
                                   .from('emergencias_activas')
-                                  .update({ estado: 'resolved' })
+                                  .update({ estado: 'completed' })
                                   .eq('id', activeMedicEmergency.id);
                               } catch (e) {
                                 console.error(e);

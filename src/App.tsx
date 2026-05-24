@@ -541,11 +541,20 @@ export default function App() {
         const { data: activeList } = await supabase
           .from('emergencias_activas')
           .select('*')
-          .eq('estado', 'active')
-          .eq('abogado_asignado_id', sessionUser.id);
+          .eq('estado', 'active');
 
-        if (activeList && activeList.length > 0) {
-          const active = activeList[0];
+        const myActiveList = (activeList || []).filter(item => {
+          try {
+            if (item.sala_webrtc_url && item.sala_webrtc_url.startsWith('{')) {
+              const meta = JSON.parse(item.sala_webrtc_url);
+              return meta.abogado_asignado_id === sessionUser.id;
+            }
+          } catch (e) {}
+          return false;
+        });
+
+        if (myActiveList && myActiveList.length > 0) {
+          const active = myActiveList[0];
           const { data: userData } = await supabase
             .from('usuarios')
             .select('nombre_completo, contacto_emergencia_1_telefono')
@@ -845,11 +854,20 @@ export default function App() {
 
       // 2. Fetch our currently active ongoing tow job if we are logged in and already accepted it
       if (sessionUser) {
-        const { data: activeData } = await supabase
+        const { data: activeList } = await supabase
           .from('emergencias_activas')
           .select('*')
-          .eq('estado', 'dispatched')
-          .eq('abogado_asignado_id', sessionUser.id);
+          .eq('estado', 'dispatched');
+
+        const activeData = (activeList || []).filter(item => {
+          try {
+            if (item.sala_webrtc_url && item.sala_webrtc_url.startsWith('{')) {
+              const meta = JSON.parse(item.sala_webrtc_url);
+              return meta.abogado_asignado_id === sessionUser.id;
+            }
+          } catch (e) {}
+          return false;
+        });
 
         if (activeData && activeData.length > 0) {
           const active = activeData[0];
@@ -951,11 +969,20 @@ export default function App() {
 
       // 2. Fetch our currently active ongoing dispatch if assigned to us
       if (sessionUser) {
-        const { data: activeData } = await supabase
+        const { data: activeList } = await supabase
           .from('emergencias_activas')
           .select('*')
-          .eq('estado', 'dispatched')
-          .eq('abogado_asignado_id', sessionUser.id);
+          .eq('estado', 'dispatched');
+
+        const activeData = (activeList || []).filter(item => {
+          try {
+            if (item.sala_webrtc_url && item.sala_webrtc_url.startsWith('{')) {
+              const meta = JSON.parse(item.sala_webrtc_url);
+              return meta.abogado_asignado_id === sessionUser.id;
+            }
+          } catch (e) {}
+          return false;
+        });
 
         if (activeData && activeData.length > 0) {
           const active = activeData[0];
@@ -1053,11 +1080,20 @@ export default function App() {
 
       // 2. Fetch our currently active medical consultation if assigned to us
       if (sessionUser) {
-        const { data: activeData } = await supabase
+        const { data: activeList } = await supabase
           .from('emergencias_activas')
           .select('*')
-          .eq('estado', 'active')
-          .eq('abogado_asignado_id', sessionUser.id);
+          .eq('estado', 'active');
+
+        const activeData = (activeList || []).filter(item => {
+          try {
+            if (item.sala_webrtc_url && item.sala_webrtc_url.startsWith('{')) {
+              const meta = JSON.parse(item.sala_webrtc_url);
+              return meta.abogado_asignado_id === sessionUser.id;
+            }
+          } catch (e) {}
+          return false;
+        });
 
         if (activeData && activeData.length > 0) {
           const active = activeData[0];
@@ -2150,11 +2186,27 @@ export default function App() {
     
     setIsAuthLoading(true);
     try {
+      const { data: row } = await supabase
+        .from('emergencias_activas')
+        .select('sala_webrtc_url')
+        .eq('id', activeEmergency.id)
+        .maybeSingle();
+
+      let meta: any = {};
+      if (row?.sala_webrtc_url && row.sala_webrtc_url.startsWith('{')) {
+        try {
+          meta = JSON.parse(row.sala_webrtc_url);
+        } catch (e) {
+          console.error(e);
+        }
+      }
+      meta.abogado_asignado_id = sessionUser?.id || null;
+
       const { error } = await supabase
         .from('emergencias_activas')
         .update({ 
           estado: 'active', 
-          abogado_asignado_id: sessionUser?.id || null,
+          sala_webrtc_url: JSON.stringify(meta),
           tarifa_aplicada: proposedTariff 
         })
         .eq('id', activeEmergency.id);
@@ -2276,13 +2328,13 @@ export default function App() {
       meta.messages = updatedMsgs;
       meta.driverName = driverProfile.name || 'Operador Asignado';
       meta.driverPhone = driverProfile.phone || 'No phone';
+      meta.abogado_asignado_id = sessionUser?.id || null;
 
       // Update Supabase to dispatched and set driver (abogado_asignado_id)
       await supabase
         .from('emergencias_activas')
         .update({
           estado: 'dispatched',
-          abogado_asignado_id: sessionUser?.id || null,
           sala_webrtc_url: JSON.stringify(meta)
         })
         .eq('id', activeTowJob.id);
@@ -5112,11 +5164,27 @@ export default function App() {
                               setAmbulanceState('dispatched');
                               triggerPush('🚑 Ruta de Rescate', 'Ruta hacia el asegurado iniciada con sirena encendida...');
                               try {
+                                const { data: row } = await supabase
+                                  .from('emergencias_activas')
+                                  .select('sala_webrtc_url')
+                                  .eq('id', activeAmbulanceJob.id)
+                                  .maybeSingle();
+
+                                let meta: any = {};
+                                if (row?.sala_webrtc_url && row.sala_webrtc_url.startsWith('{')) {
+                                  try {
+                                    meta = JSON.parse(row.sala_webrtc_url);
+                                  } catch (e) {
+                                    console.error(e);
+                                  }
+                                }
+                                meta.abogado_asignado_id = sessionUser?.id || null;
+
                                 await supabase
                                   .from('emergencias_activas')
                                   .update({ 
                                     estado: 'dispatched',
-                                    abogado_asignado_id: sessionUser?.id || null
+                                    sala_webrtc_url: JSON.stringify(meta)
                                   })
                                   .eq('id', activeAmbulanceJob.id);
                               } catch (e) {
@@ -5337,11 +5405,27 @@ export default function App() {
                               setMedicState('active');
                               triggerPush('📹 Sala Telemédica', 'Consulta iniciada. Estableciendo transmisión de video bidireccional...');
                               try {
+                                const { data: row } = await supabase
+                                  .from('emergencias_activas')
+                                  .select('sala_webrtc_url')
+                                  .eq('id', activeMedicEmergency.id)
+                                  .maybeSingle();
+
+                                let meta: any = {};
+                                if (row?.sala_webrtc_url && row.sala_webrtc_url.startsWith('{')) {
+                                  try {
+                                    meta = JSON.parse(row.sala_webrtc_url);
+                                  } catch (e) {
+                                    console.error(e);
+                                  }
+                                }
+                                meta.abogado_asignado_id = sessionUser?.id || null;
+
                                 await supabase
                                   .from('emergencias_activas')
                                   .update({ 
                                     estado: 'active',
-                                    abogado_asignado_id: sessionUser?.id || null
+                                    sala_webrtc_url: JSON.stringify(meta)
                                   })
                                   .eq('id', activeMedicEmergency.id);
                               } catch (e) {

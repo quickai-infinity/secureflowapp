@@ -540,7 +540,7 @@ export default function App() {
           latitude: Number(active.ubicacion_lat),
           longitude: Number(active.ubicacion_lng),
           tarifa: Number(active.tarifa_aplicada),
-          dailyRoomUrl: active.daily_room_url
+          dailyRoomUrl: active.sala_webrtc_url || active.daily_room_url
         });
         return;
       }
@@ -549,20 +549,11 @@ export default function App() {
         const { data: activeList } = await supabase
           .from('emergencias_activas')
           .select('*')
-          .eq('estado', 'active');
+          .eq('estado', 'active')
+          .eq('asignado_id', sessionUser.id);
 
-        const myActiveList = (activeList || []).filter(item => {
-          try {
-            if (item.sala_webrtc_url && item.sala_webrtc_url.startsWith('{')) {
-              const meta = JSON.parse(item.sala_webrtc_url);
-              return meta.abogado_asignado_id === sessionUser.id;
-            }
-          } catch (e) {}
-          return false;
-        });
-
-        if (myActiveList && myActiveList.length > 0) {
-          const active = myActiveList[0];
+        if (activeList && activeList.length > 0) {
+          const active = activeList[0];
           const { data: userData } = await supabase
             .from('usuarios')
             .select('nombre_completo, contacto_emergencia_1_telefono')
@@ -571,20 +562,6 @@ export default function App() {
 
           const citizen_name = userData?.nombre_completo || 'Ciudadano';
           const citizen_phone = userData?.contacto_emergencia_1_telefono || '';
-          
-          let parsedMsgs: Message[] = [];
-          try {
-            if (active.sala_webrtc_url && active.sala_webrtc_url.startsWith('{')) {
-              const meta = JSON.parse(active.sala_webrtc_url);
-              if (meta.messages) {
-                parsedMsgs = meta.messages;
-              }
-            }
-          } catch(e) {
-            console.error(e);
-          }
-
-          setAgentMessages(parsedMsgs);
 
           setActiveEmergency({
             id: active.id,
@@ -595,7 +572,7 @@ export default function App() {
             latitude: Number(active.ubicacion_lat),
             longitude: Number(active.ubicacion_lng),
             tarifa: Number(active.tarifa_aplicada),
-            dailyRoomUrl: active.daily_room_url
+            dailyRoomUrl: active.sala_webrtc_url || active.daily_room_url
           });
           return;
         }
@@ -624,24 +601,22 @@ export default function App() {
 
     const channel = supabase
       .channel(`tow-${activeTowJob.id}`)
-      .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'emergencias_activas', filter: `id=eq.${activeTowJob.id}` }, (payload) => {
+      .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'emergencias_activas', filter: `id=eq.${activeTowJob.id}` }, async (payload) => {
         const updated = payload.new;
         if (updated.estado === 'dispatched') {
           setTowState('dispatched');
-          try {
-            if (updated.sala_webrtc_url && updated.sala_webrtc_url.startsWith('{')) {
-              const meta = JSON.parse(updated.sala_webrtc_url);
-              if (meta.messages) {
-                setTowMessages(meta.messages);
-              }
-              setActiveTowJob(prev => prev ? {
-                ...prev,
-                driverName: meta.driverName || 'Asignado',
-                driverPhone: meta.driverPhone || ''
-              } : null);
-            }
-          } catch (e) {
-            console.error("Error parsing update in citizen sync:", e);
+          if (updated.asignado_id) {
+            const { data: userData } = await supabase
+              .from('usuarios')
+              .select('nombre_completo, contacto_emergencia_1_telefono')
+              .eq('id', updated.asignado_id)
+              .maybeSingle();
+
+            setActiveTowJob(prev => prev ? {
+              ...prev,
+              driverName: userData?.nombre_completo || 'Asignado',
+              driverPhone: userData?.contacto_emergencia_1_telefono || ''
+            } : null);
           }
         } else if (updated.estado === 'completed') {
           // Resolved successfully
@@ -672,17 +647,6 @@ export default function App() {
           setSosState('active');
           setIsLiveVideoActive(true);
           setIsLawyerDailyCoActive(true);
-          
-          try {
-            if (updated.sala_webrtc_url && updated.sala_webrtc_url.startsWith('{')) {
-              const meta = JSON.parse(updated.sala_webrtc_url);
-              if (meta.messages) {
-                setAgentMessages(meta.messages);
-              }
-            }
-          } catch (e) {
-            console.error("Error parsing update in citizen lawyer sync:", e);
-          }
         } else if (updated.estado === 'completed') {
           setIsLiveVideoActive(false);
           setSosState('idle');
@@ -691,17 +655,6 @@ export default function App() {
           setCitizenBalance(b => Math.max(0, b - rate));
           showMaterialAlert('⚖️ Amparo Concluido', `Procedimiento terminado con éxito. Se debitaron $${rate} USD por asistencia legal certificada.`);
           channel.unsubscribe();
-        } else {
-          try {
-            if (updated.sala_webrtc_url && updated.sala_webrtc_url.startsWith('{')) {
-              const meta = JSON.parse(updated.sala_webrtc_url);
-              if (meta.messages) {
-                setAgentMessages(meta.messages);
-              }
-            }
-          } catch(e) {
-            console.error(e);
-          }
         }
       })
       .subscribe();
@@ -724,17 +677,6 @@ export default function App() {
           setIsMedicWindowOpen(true);
           setIsMedicDailyCoActive(true);
           triggerPush('🏥 Doctor Conectado', 'El médico de guardia ha aceptado tu caso y ya está conectado.');
-          
-          try {
-            if (updated.sala_webrtc_url && updated.sala_webrtc_url.startsWith('{')) {
-              const meta = JSON.parse(updated.sala_webrtc_url);
-              if (meta.messages) {
-                setMedicMessages(meta.messages);
-              }
-            }
-          } catch(e) {
-            console.error(e);
-          }
         } else if (updated.estado === 'completed') {
           setMedicState('idle');
           setActiveMedicEmergency(null);
@@ -743,17 +685,6 @@ export default function App() {
           setCitizenBalance(b => Math.max(0, b - rate));
           showMaterialAlert('🩺 Consulta Concluida', 'El médico de guardia ha finalizado la sesión de teleconsulta.');
           channel.unsubscribe();
-        } else {
-          try {
-            if (updated.sala_webrtc_url && updated.sala_webrtc_url.startsWith('{')) {
-              const meta = JSON.parse(updated.sala_webrtc_url);
-              if (meta.messages) {
-                setMedicMessages(meta.messages);
-              }
-            }
-          } catch(e) {
-            console.error(e);
-          }
         }
       })
       .subscribe();
@@ -775,17 +706,6 @@ export default function App() {
           setAmbulanceState('dispatched');
           setIsAmbulanceWindowOpen(true);
           triggerPush('🚑 Auxilio en Camino', 'La unidad de paramédicos de resguardo ha iniciado ruta oficial hacia tu ubicación.');
-          
-          try {
-            if (updated.sala_webrtc_url && updated.sala_webrtc_url.startsWith('{')) {
-              const meta = JSON.parse(updated.sala_webrtc_url);
-              if (meta.messages) {
-                setAmbulanceMessages(meta.messages);
-              }
-            }
-          } catch(e) {
-            console.error(e);
-          }
         } else if (updated.estado === 'completed') {
           setAmbulanceState('idle');
           setActiveAmbulanceJob(null);
@@ -794,17 +714,6 @@ export default function App() {
           setCitizenBalance(b => Math.max(0, b - rate));
           showMaterialAlert('🚑 Traslado Concluido', 'La ambulancia ha finalizado el caso.');
           channel.unsubscribe();
-        } else {
-          try {
-            if (updated.sala_webrtc_url && updated.sala_webrtc_url.startsWith('{')) {
-              const meta = JSON.parse(updated.sala_webrtc_url);
-              if (meta.messages) {
-                setAmbulanceMessages(meta.messages);
-              }
-            }
-          } catch(e) {
-            console.error(e);
-          }
         }
       })
       .subscribe();
@@ -827,21 +736,15 @@ export default function App() {
 
       if (callingData && callingData.length > 0) {
         const active = callingData[0];
-        let cName = 'Ciudadano';
-        let cPhone = '';
-        let distance = 3450;
-        let msgs: Message[] = [];
-        try {
-          if (active.sala_webrtc_url && active.sala_webrtc_url.startsWith('{')) {
-            const meta = JSON.parse(active.sala_webrtc_url);
-            cName = meta.citizenName || cName;
-            cPhone = meta.citizenPhone || cPhone;
-            distance = meta.distance || distance;
-            msgs = meta.messages || msgs;
-          }
-        } catch (e) {
-          console.warn("Error parsing calling tow metadata JSON:", e);
-        }
+        const { data: userData } = await supabase
+          .from('usuarios')
+          .select('nombre_completo, contacto_emergencia_1_telefono')
+          .eq('id', active.ciudadano_id)
+          .maybeSingle();
+
+        const cName = userData?.nombre_completo || 'Ciudadano';
+        const cPhone = userData?.contacto_emergencia_1_telefono || '';
+        const distance = 3450;
 
         if (towState === 'idle') {
           setTowState('proposed');
@@ -855,7 +758,6 @@ export default function App() {
             price: Number(active.tarifa_aplicada),
             distance: distance
           });
-          setTowMessages(msgs);
         }
         return;
       }
@@ -865,35 +767,20 @@ export default function App() {
         const { data: activeList } = await supabase
           .from('emergencias_activas')
           .select('*')
-          .eq('estado', 'dispatched');
+          .eq('estado', 'dispatched')
+          .eq('asignado_id', sessionUser.id);
 
-        const activeData = (activeList || []).filter(item => {
-          try {
-            if (item.sala_webrtc_url && item.sala_webrtc_url.startsWith('{')) {
-              const meta = JSON.parse(item.sala_webrtc_url);
-              return meta.abogado_asignado_id === sessionUser.id;
-            }
-          } catch (e) {}
-          return false;
-        });
+        if (activeList && activeList.length > 0) {
+          const active = activeList[0];
+          const { data: userData } = await supabase
+            .from('usuarios')
+            .select('nombre_completo, contacto_emergencia_1_telefono')
+            .eq('id', active.ciudadano_id)
+            .maybeSingle();
 
-        if (activeData && activeData.length > 0) {
-          const active = activeData[0];
-          let cName = 'Ciudadano';
-          let cPhone = '';
-          let distance = 3450;
-          let msgs: Message[] = [];
-          try {
-            if (active.sala_webrtc_url && active.sala_webrtc_url.startsWith('{')) {
-              const meta = JSON.parse(active.sala_webrtc_url);
-              cName = meta.citizenName || cName;
-              cPhone = meta.citizenPhone || cPhone;
-              distance = meta.distance || distance;
-              msgs = meta.messages || msgs;
-            }
-          } catch (e) {
-            console.warn("Error parsing active tow metadata JSON:", e);
-          }
+          const cName = userData?.nombre_completo || 'Ciudadano';
+          const cPhone = userData?.contacto_emergencia_1_telefono || '';
+          const distance = 3450;
 
           setTowState('dispatched');
           setActiveTowJob({
@@ -906,7 +793,6 @@ export default function App() {
             price: Number(active.tarifa_aplicada),
             distance: distance
           });
-          setTowMessages(msgs);
         } else {
           // No calling or active job
           if (towState !== 'idle') {
@@ -943,21 +829,15 @@ export default function App() {
 
       if (callingData && callingData.length > 0) {
         const active = callingData[0];
-        let cName = 'Ciudadano';
-        let cPhone = '';
-        let distance = 2100;
-        let msgs: Message[] = [];
-        try {
-          if (active.sala_webrtc_url && active.sala_webrtc_url.startsWith('{')) {
-            const meta = JSON.parse(active.sala_webrtc_url);
-            cName = meta.citizenName || cName;
-            cPhone = meta.citizenPhone || cPhone;
-            distance = meta.distance || distance;
-            msgs = meta.messages || msgs;
-          }
-        } catch (e) {
-          console.warn(e);
-        }
+        const { data: userData } = await supabase
+          .from('usuarios')
+          .select('nombre_completo, contacto_emergencia_1_telefono')
+          .eq('id', active.ciudadano_id)
+          .maybeSingle();
+
+        const cName = userData?.nombre_completo || 'Ciudadano';
+        const cPhone = userData?.contacto_emergencia_1_telefono || '';
+        const distance = 2100;
 
         if (ambulanceState === 'idle') {
           setAmbulanceState('proposed');
@@ -970,7 +850,6 @@ export default function App() {
             price: Number(active.tarifa_aplicada),
             distance: distance
           });
-          setAmbulanceMessages(msgs);
         }
         return;
       }
@@ -980,35 +859,20 @@ export default function App() {
         const { data: activeList } = await supabase
           .from('emergencias_activas')
           .select('*')
-          .eq('estado', 'dispatched');
+          .eq('estado', 'dispatched')
+          .eq('asignado_id', sessionUser.id);
 
-        const activeData = (activeList || []).filter(item => {
-          try {
-            if (item.sala_webrtc_url && item.sala_webrtc_url.startsWith('{')) {
-              const meta = JSON.parse(item.sala_webrtc_url);
-              return meta.abogado_asignado_id === sessionUser.id;
-            }
-          } catch (e) {}
-          return false;
-        });
+        if (activeList && activeList.length > 0) {
+          const active = activeList[0];
+          const { data: userData } = await supabase
+            .from('usuarios')
+            .select('nombre_completo, contacto_emergencia_1_telefono')
+            .eq('id', active.ciudadano_id)
+            .maybeSingle();
 
-        if (activeData && activeData.length > 0) {
-          const active = activeData[0];
-          let cName = 'Ciudadano';
-          let cPhone = '';
-          let distance = 2100;
-          let msgs: Message[] = [];
-          try {
-            if (active.sala_webrtc_url && active.sala_webrtc_url.startsWith('{')) {
-              const meta = JSON.parse(active.sala_webrtc_url);
-              cName = meta.citizenName || cName;
-              cPhone = meta.citizenPhone || cPhone;
-              distance = meta.distance || distance;
-              msgs = meta.messages || msgs;
-            }
-          } catch (e) {
-            console.warn(e);
-          }
+          const cName = userData?.nombre_completo || 'Ciudadano';
+          const cPhone = userData?.contacto_emergencia_1_telefono || '';
+          const distance = 2100;
 
           setAmbulanceState('dispatched');
           setIsAmbulanceDailyCoActive(true);
@@ -1021,7 +885,6 @@ export default function App() {
             price: Number(active.tarifa_aplicada),
             distance: distance
           });
-          setAmbulanceMessages(msgs);
         } else {
           if (ambulanceState !== 'idle') {
             setAmbulanceState('idle');
@@ -1043,7 +906,7 @@ export default function App() {
     return () => {
       supabase.removeChannel(channel);
     };
-  }, [activeDevice, ambulanceState]);
+  }, [activeDevice, ambulanceState, sessionUser?.id]);
 
   // Real-time synchronization for Doctor/Medic Guard Panel
   useEffect(() => {
@@ -1057,19 +920,14 @@ export default function App() {
 
       if (callingData && callingData.length > 0) {
         const active = callingData[0];
-        let cName = 'Ciudadano de Guardia';
-        let cPhone = '';
-        let msgs: Message[] = [];
-        try {
-          if (active.sala_webrtc_url && active.sala_webrtc_url.startsWith('{')) {
-            const meta = JSON.parse(active.sala_webrtc_url);
-            cName = meta.citizenName || cName;
-            cPhone = meta.citizenPhone || cPhone;
-            msgs = meta.messages || msgs;
-          }
-        } catch (e) {
-          console.warn(e);
-        }
+        const { data: userData } = await supabase
+          .from('usuarios')
+          .select('nombre_completo, contacto_emergencia_1_telefono')
+          .eq('id', active.ciudadano_id)
+          .maybeSingle();
+
+        const cName = userData?.nombre_completo || 'Ciudadano de Guardia';
+        const cPhone = userData?.contacto_emergencia_1_telefono || '';
 
         if (medicState === 'idle') {
           setMedicState('calling');
@@ -1081,7 +939,6 @@ export default function App() {
             longitude: Number(active.ubicacion_lng),
             price: Number(active.tarifa_aplicada)
           });
-          setMedicMessages(msgs);
         }
         return;
       }
@@ -1091,33 +948,19 @@ export default function App() {
         const { data: activeList } = await supabase
           .from('emergencias_activas')
           .select('*')
-          .eq('estado', 'active');
+          .eq('estado', 'active')
+          .eq('asignado_id', sessionUser.id);
 
-        const activeData = (activeList || []).filter(item => {
-          try {
-            if (item.sala_webrtc_url && item.sala_webrtc_url.startsWith('{')) {
-              const meta = JSON.parse(item.sala_webrtc_url);
-              return meta.abogado_asignado_id === sessionUser.id;
-            }
-          } catch (e) {}
-          return false;
-        });
+        if (activeList && activeList.length > 0) {
+          const active = activeList[0];
+          const { data: userData } = await supabase
+            .from('usuarios')
+            .select('nombre_completo, contacto_emergencia_1_telefono')
+            .eq('id', active.ciudadano_id)
+            .maybeSingle();
 
-        if (activeData && activeData.length > 0) {
-          const active = activeData[0];
-          let cName = 'Ciudadano de Guardia';
-          let cPhone = '';
-          let msgs: Message[] = [];
-          try {
-            if (active.sala_webrtc_url && active.sala_webrtc_url.startsWith('{')) {
-              const meta = JSON.parse(active.sala_webrtc_url);
-              cName = meta.citizenName || cName;
-              cPhone = meta.citizenPhone || cPhone;
-              msgs = meta.messages || msgs;
-            }
-          } catch (e) {
-            console.warn(e);
-          }
+          const cName = userData?.nombre_completo || 'Ciudadano de Guardia';
+          const cPhone = userData?.contacto_emergencia_1_telefono || '';
 
           setMedicState('active');
           setIsMedicDailyCoActive(true);
@@ -1129,7 +972,6 @@ export default function App() {
             longitude: Number(active.ubicacion_lng),
             price: Number(active.tarifa_aplicada)
           });
-          setMedicMessages(msgs);
         } else {
           if (medicState !== 'idle') {
             setMedicState('idle');
@@ -1151,7 +993,74 @@ export default function App() {
     return () => {
       supabase.removeChannel(channel);
     };
-  }, [activeDevice, medicState]);
+  }, [activeDevice, medicState, sessionUser?.id]);
+
+  // Synchronized Real-time broadcast chat messaging hook for all active roles
+  useEffect(() => {
+    let activeId = '';
+    let channelName = '';
+    let setMsgs: React.Dispatch<React.SetStateAction<Message[]>> | null = null;
+
+    if (activeDevice === 'citizen') {
+      if (activeEmergency) {
+        activeId = activeEmergency.id;
+        channelName = `room-lawyer-${activeId}`;
+        setMsgs = setAgentMessages;
+      } else if (activeTowJob) {
+        activeId = activeTowJob.id;
+        channelName = `room-tow-${activeId}`;
+        setMsgs = setTowMessages;
+      } else if (activeAmbulanceJob) {
+        activeId = activeAmbulanceJob.id;
+        channelName = `room-ambulance-${activeId}`;
+        setMsgs = setAmbulanceMessages;
+      } else if (activeMedicEmergency) {
+        activeId = activeMedicEmergency.id;
+        channelName = `room-medic-${activeId}`;
+        setMsgs = setMedicMessages;
+      }
+    } else {
+      // Professional side
+      if (activeDevice === 'lawyer' && activeEmergency) {
+        activeId = activeEmergency.id;
+        channelName = `room-lawyer-${activeId}`;
+        setMsgs = setAgentMessages;
+      } else if (activeDevice === 'driver' && activeTowJob) {
+        activeId = activeTowJob.id;
+        channelName = `room-tow-${activeId}`;
+        setMsgs = setTowMessages;
+      } else if (activeDevice === 'ambulance' && activeAmbulanceJob) {
+        activeId = activeAmbulanceJob.id;
+        channelName = `room-ambulance-${activeId}`;
+        setMsgs = setAmbulanceMessages;
+      } else if (activeDevice === 'medic' && activeMedicEmergency) {
+        activeId = activeMedicEmergency.id;
+        channelName = `room-medic-${activeId}`;
+        setMsgs = setMedicMessages;
+      }
+    }
+
+    if (!activeId || !channelName || !setMsgs) return;
+
+    const channel = supabase
+      .channel(channelName)
+      .on('broadcast', { event: 'shout' }, ({ payload }) => {
+        if (payload && payload.msg && setMsgs) {
+          setMsgs(prev => {
+            // Avoid duplicate messages if received from our own send
+            if (prev.some(m => m.text === payload.msg.text && m.sender === payload.msg.sender && m.time === payload.msg.time)) {
+              return prev;
+            }
+            return [...prev, payload.msg];
+          });
+        }
+      })
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [activeDevice, activeEmergency?.id, activeTowJob?.id, activeAmbulanceJob?.id, activeMedicEmergency?.id]);
 
   // Real Selfie Camera Handlers for authentic Biometrics
   const startSelfieCamera = async () => {
@@ -1348,30 +1257,15 @@ export default function App() {
     setAgentInput('');
 
     if (activeEmergency) {
+      setAgentMessages(prev => [...prev, newMsg]);
       try {
-        const { data: row } = await supabase
-          .from('emergencias_activas')
-          .select('sala_webrtc_url')
-          .eq('id', activeEmergency.id)
-          .single();
-
-        let meta: any = {};
-        if (row?.sala_webrtc_url && row.sala_webrtc_url.startsWith('{')) {
-          meta = JSON.parse(row.sala_webrtc_url);
-        }
-
-        const updatedMsgs = [...(meta.messages || []), newMsg];
-        meta.messages = updatedMsgs;
-
-        await supabase
-          .from('emergencias_activas')
-          .update({ sala_webrtc_url: JSON.stringify(meta) })
-          .eq('id', activeEmergency.id);
-
-        setAgentMessages(updatedMsgs);
+        await supabase.channel(`room-lawyer-${activeEmergency.id}`).send({
+          type: 'broadcast',
+          event: 'shout',
+          payload: { msg: newMsg }
+        });
       } catch (e) {
-        console.error("Error sending synchronized lawyer chat message:", e);
-        setAgentMessages(m => [...m, newMsg]);
+        console.error("Error broadcasting lawyer chat message:", e);
       }
       return;
     }
@@ -1617,11 +1511,7 @@ export default function App() {
       await supabase.from('emergencias_activas').insert({
         id: emerId,
         ciudadano_id: sessionUser?.id || null,
-        sala_webrtc_url: JSON.stringify({
-          citizenName: citizenProfile.name,
-          citizenPhone: citizenProfile.phone,
-          messages: []
-        }),
+        sala_webrtc_url: dailyUrlGenerated,
         estado: 'calling',
         ubicacion_texto: citizenProfile.city,
         ubicacion_lat: citizenCoords.lat,
@@ -1706,7 +1596,7 @@ export default function App() {
             ubicacion_lat: citizenCoords.lat,
             ubicacion_lng: citizenCoords.lng,
             tarifa_aplicada: estimatedPrice,
-            sala_webrtc_url: JSON.stringify(initialMeta)
+            sala_webrtc_url: "https://meet.jit.si/SecureFlow-Ambulance-" + emerId
           });
           triggerPush('🚑 Ambulancia Solicitada', 'Buscando la unidad de paramédicos de guardia oficial más cercana...');
         } catch (e) {
@@ -1760,7 +1650,7 @@ export default function App() {
             ubicacion_lat: citizenCoords.lat,
             ubicacion_lng: citizenCoords.lng,
             tarifa_aplicada: 20.0,
-            sala_webrtc_url: JSON.stringify({ type: 'medic_video', messages: [] })
+            sala_webrtc_url: "https://meet.jit.si/SecureFlow-Medic-" + emerId
           });
           
           // Also trigger webhook for doctor emergency just in case! 
@@ -2178,7 +2068,7 @@ export default function App() {
             ubicacion_lat: citizenCoords.lat,
             ubicacion_lng: citizenCoords.lng,
             tarifa_aplicada: estimatedPrice,
-            sala_webrtc_url: JSON.stringify(initialMeta)
+            sala_webrtc_url: "https://meet.jit.si/SecureFlow-Tow-" + emerId
           });
           triggerPush('🚜 Alerta Solicitud Grúa', 'Buscando unidad de grúa disponible en el sector...');
         } catch (e) {
@@ -2194,27 +2084,11 @@ export default function App() {
     
     setIsAuthLoading(true);
     try {
-      const { data: row } = await supabase
-        .from('emergencias_activas')
-        .select('sala_webrtc_url')
-        .eq('id', activeEmergency.id)
-        .maybeSingle();
-
-      let meta: any = {};
-      if (row?.sala_webrtc_url && row.sala_webrtc_url.startsWith('{')) {
-        try {
-          meta = JSON.parse(row.sala_webrtc_url);
-        } catch (e) {
-          console.error(e);
-        }
-      }
-      meta.abogado_asignado_id = sessionUser?.id || null;
-
       const { error } = await supabase
         .from('emergencias_activas')
         .update({ 
           estado: 'active', 
-          sala_webrtc_url: JSON.stringify(meta),
+          asignado_id: sessionUser?.id || null,
           tarifa_aplicada: proposedTariff 
         })
         .eq('id', activeEmergency.id);
@@ -2312,40 +2186,16 @@ export default function App() {
     if (!activeTowJob) return;
 
     try {
-      // Fetch current metadata to keep or prepend messages array
-      const { data: row } = await supabase
-        .from('emergencias_activas')
-        .select('sala_webrtc_url')
-        .eq('id', activeTowJob.id)
-        .single();
-
-      let meta: any = {};
-      if (row?.sala_webrtc_url && row.sala_webrtc_url.startsWith('{')) {
-        meta = JSON.parse(row.sala_webrtc_url);
-      }
-
-      // Prepend or add first driver message with logged-in driver's actual registered name
-      const timeStr = new Date().toLocaleTimeString('es-VE', { hour: '2-digit', minute: '2-digit', hour12: false });
-      const initialDriverMsg = { 
-        sender: 'driver' as const, 
-        text: `🚨 Hola ${meta.citizenName || 'Asegurado'}, soy el operador de grúa ${driverProfile.name || 'Asignado'}. Ya voy en ruta hacia tu localización en tiempo real con mi remolque. Puedes escribirme por aquí.`, 
-        time: timeStr 
-      };
-      
-      const updatedMsgs = [...(meta.messages || []), initialDriverMsg];
-      meta.messages = updatedMsgs;
-      meta.driverName = driverProfile.name || 'Operador Asignado';
-      meta.driverPhone = driverProfile.phone || 'No phone';
-      meta.abogado_asignado_id = sessionUser?.id || null;
-
-      // Update Supabase to dispatched and set driver (abogado_asignado_id)
-      await supabase
+      // Update Supabase to dispatched and set driver (asignado_id)
+      const { error } = await supabase
         .from('emergencias_activas')
         .update({
           estado: 'dispatched',
-          sala_webrtc_url: JSON.stringify(meta)
+          asignado_id: sessionUser?.id || null
         })
         .eq('id', activeTowJob.id);
+
+      if (error) throw error;
 
       setActiveTowJob({
         ...activeTowJob,
@@ -2354,7 +2204,28 @@ export default function App() {
         driverPhone: driverProfile.phone || 'No phone'
       });
       setTowState('dispatched');
-      setTowMessages(updatedMsgs);
+
+      // Prepend or add first driver message with logged-in driver's actual registered name
+      const timeStr = new Date().toLocaleTimeString('es-VE', { hour: '2-digit', minute: '2-digit', hour12: false });
+      const initialDriverMsg = { 
+        sender: 'driver' as const, 
+        text: `🚨 Hola, soy el operador de grúa ${driverProfile.name || 'Asignado'}. Ya voy en ruta hacia tu localización en tiempo real con mi remolque. Puedes escribirme por aquí.`, 
+        time: timeStr 
+      };
+      
+      setTowMessages([initialDriverMsg]);
+
+      // Broadcast welcome message in real-time
+      try {
+        await supabase.channel(`room-tow-${activeTowJob.id}`).send({
+          type: 'broadcast',
+          event: 'shout',
+          payload: { msg: initialDriverMsg }
+        });
+      } catch (e) {
+        console.error(e);
+      }
+
       triggerPush('🚜 Despacho Vial Aceptado', 'El operador ha iniciado tránsito hacia las coordenadas de tu GPS.');
     } catch (e) {
       console.error("Error accepting dispatch in DB:", e);
@@ -2379,42 +2250,16 @@ export default function App() {
       setTowChatInput('');
     }
 
-    // Read the current record in Supabase to avoid overwriting other fields
+    setTowMessages(prev => [...prev, newMsg]);
+
     try {
-      const { data: row } = await supabase
-        .from('emergencias_activas')
-        .select('sala_webrtc_url')
-        .eq('id', currentJob.id)
-        .single();
-
-      let currentMeta: any = {};
-      if (row?.sala_webrtc_url && row.sala_webrtc_url.startsWith('{')) {
-        currentMeta = JSON.parse(row.sala_webrtc_url);
-      }
-
-      const existingMsgs = currentMeta.messages || [];
-      const updatedMsgs = [...existingMsgs, newMsg];
-
-      const newMeta = {
-        ...currentMeta,
-        messages: updatedMsgs,
-        citizenName: currentJob.citizenName,
-        citizenPhone: currentJob.citizenPhone,
-        distance: currentJob.distance
-      };
-
-      // Write changes back to DB
-      await supabase
-        .from('emergencias_activas')
-        .update({ sala_webrtc_url: JSON.stringify(newMeta) })
-        .eq('id', currentJob.id);
-
-      // Explicitly update local state too
-      setTowMessages(updatedMsgs);
+      await supabase.channel(`room-tow-${currentJob.id}`).send({
+        type: 'broadcast',
+        event: 'shout',
+        payload: { msg: newMsg }
+      });
     } catch (e) {
       console.error("Error sending synchronized tow chat message:", e);
-      // Fallback in case of DB offline state
-      setTowMessages(m => [...m, newMsg]);
     }
   };
 
@@ -2428,32 +2273,15 @@ export default function App() {
     if (!textOverride) setAmbulanceChatInput('');
 
     if (activeAmbulanceJob) {
+      setAmbulanceMessages(prev => [...prev, newMsg]);
       try {
-        const { data: row } = await supabase
-          .from('emergencias_activas')
-          .select('sala_webrtc_url')
-          .eq('id', activeAmbulanceJob.id)
-          .single();
-
-        let meta: any = {};
-        if (row?.sala_webrtc_url && row.sala_webrtc_url.startsWith('{')) {
-          meta = JSON.parse(row.sala_webrtc_url);
-        }
-
-        const updatedMsgs = [...(meta.messages || []), newMsg];
-        meta.messages = updatedMsgs;
-
-        await supabase
-          .from('emergencias_activas')
-          .update({
-            sala_webrtc_url: JSON.stringify(meta)
-          })
-          .eq('id', activeAmbulanceJob.id);
-
-        setAmbulanceMessages(updatedMsgs);
+        await supabase.channel(`room-ambulance-${activeAmbulanceJob.id}`).send({
+          type: 'broadcast',
+          event: 'shout',
+          payload: { msg: newMsg }
+        });
       } catch (e) {
         console.error("Error sending synchronized ambulance message:", e);
-        setAmbulanceMessages(prev => [...prev, newMsg]);
       }
     } else {
       setAmbulanceMessages(prev => [...prev, newMsg]);
@@ -2482,32 +2310,15 @@ export default function App() {
     if (!textOverride) setMedicChatInput('');
 
     if (activeMedicEmergency) {
+      setMedicMessages(prev => [...prev, newMsg]);
       try {
-        const { data: row } = await supabase
-          .from('emergencias_activas')
-          .select('sala_webrtc_url')
-          .eq('id', activeMedicEmergency.id)
-          .single();
-
-        let meta: any = {};
-        if (row?.sala_webrtc_url && row.sala_webrtc_url.startsWith('{')) {
-          meta = JSON.parse(row.sala_webrtc_url);
-        }
-
-        const updatedMsgs = [...(meta.messages || []), newMsg];
-        meta.messages = updatedMsgs;
-
-        await supabase
-          .from('emergencias_activas')
-          .update({
-            sala_webrtc_url: JSON.stringify(meta)
-          })
-          .eq('id', activeMedicEmergency.id);
-
-        setMedicMessages(updatedMsgs);
+        await supabase.channel(`room-medic-${activeMedicEmergency.id}`).send({
+          type: 'broadcast',
+          event: 'shout',
+          payload: { msg: newMsg }
+        });
       } catch (e) {
         console.error("Error sending synchronized medic message:", e);
-        setMedicMessages(prev => [...prev, newMsg]);
       }
     } else {
       setMedicMessages(prev => [...prev, newMsg]);
@@ -2538,30 +2349,16 @@ export default function App() {
 
     setLawyerChatInput('');
 
+    setAgentMessages(prev => [...prev, newMsg]);
+
     try {
-      const { data: row } = await supabase
-        .from('emergencias_activas')
-        .select('sala_webrtc_url')
-        .eq('id', activeEmergency.id)
-        .single();
-
-      let meta: any = {};
-      if (row?.sala_webrtc_url && row.sala_webrtc_url.startsWith('{')) {
-        meta = JSON.parse(row.sala_webrtc_url);
-      }
-
-      const updatedMsgs = [...(meta.messages || []), newMsg];
-      meta.messages = updatedMsgs;
-
-      await supabase
-        .from('emergencias_activas')
-        .update({ sala_webrtc_url: JSON.stringify(meta) })
-        .eq('id', activeEmergency.id);
-
-      setAgentMessages(updatedMsgs);
+      await supabase.channel(`room-lawyer-${activeEmergency.id}`).send({
+        type: 'broadcast',
+        event: 'shout',
+        payload: { msg: newMsg }
+      });
     } catch (e) {
       console.error("Error sending lawyer response:", e);
-      setAgentMessages(m => [...m, newMsg]);
     }
   };
 
@@ -5172,27 +4969,11 @@ export default function App() {
                               setAmbulanceState('dispatched');
                               triggerPush('🚑 Ruta de Rescate', 'Ruta hacia el asegurado iniciada con sirena encendida...');
                               try {
-                                const { data: row } = await supabase
-                                  .from('emergencias_activas')
-                                  .select('sala_webrtc_url')
-                                  .eq('id', activeAmbulanceJob.id)
-                                  .maybeSingle();
-
-                                let meta: any = {};
-                                if (row?.sala_webrtc_url && row.sala_webrtc_url.startsWith('{')) {
-                                  try {
-                                    meta = JSON.parse(row.sala_webrtc_url);
-                                  } catch (e) {
-                                    console.error(e);
-                                  }
-                                }
-                                meta.abogado_asignado_id = sessionUser?.id || null;
-
                                 await supabase
                                   .from('emergencias_activas')
                                   .update({ 
                                     estado: 'dispatched',
-                                    sala_webrtc_url: JSON.stringify(meta)
+                                    asignado_id: sessionUser?.id || null
                                   })
                                   .eq('id', activeAmbulanceJob.id);
                               } catch (e) {
@@ -5413,27 +5194,11 @@ export default function App() {
                               setMedicState('active');
                               triggerPush('📹 Sala Telemédica', 'Consulta iniciada. Estableciendo transmisión de video bidireccional...');
                               try {
-                                const { data: row } = await supabase
-                                  .from('emergencias_activas')
-                                  .select('sala_webrtc_url')
-                                  .eq('id', activeMedicEmergency.id)
-                                  .maybeSingle();
-
-                                let meta: any = {};
-                                if (row?.sala_webrtc_url && row.sala_webrtc_url.startsWith('{')) {
-                                  try {
-                                    meta = JSON.parse(row.sala_webrtc_url);
-                                  } catch (e) {
-                                    console.error(e);
-                                  }
-                                }
-                                meta.abogado_asignado_id = sessionUser?.id || null;
-
                                 await supabase
                                   .from('emergencias_activas')
                                   .update({ 
                                     estado: 'active',
-                                    sala_webrtc_url: JSON.stringify(meta)
+                                    asignado_id: sessionUser?.id || null
                                   })
                                   .eq('id', activeMedicEmergency.id);
                               } catch (e) {

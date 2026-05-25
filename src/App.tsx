@@ -13,6 +13,14 @@ const SUPABASE_ANON_KEY = (import.meta as any).env.VITE_SUPABASE_ANON_KEY || 'ey
 
 export const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
+function generateUUIDv4() {
+  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
+    const r = Math.random() * 16 | 0;
+    const v = c === 'x' ? r : (r & 0x3 | 0x8);
+    return v.toString(16);
+  });
+}
+
 const SecureFlowLogoCustom = ({ className = "w-16 h-16" }: { className?: string }) => {
   return (
     <div className={`relative flex items-center justify-center ${className}`}>
@@ -608,7 +616,7 @@ export default function App() {
     return () => {
       supabase.removeChannel(channel);
     };
-  }, [activeDevice]);
+  }, [activeDevice, sessionUser?.id]);
 
   // Real-time listener for the citizen to sync the crane request status and chat messages from Supabase
   useEffect(() => {
@@ -1559,7 +1567,7 @@ export default function App() {
     setVideoStreamType('rear');
     triggerPush('🚨 Llamada SOS Iniciada', 'Conectando con la sala de defensa penal... Buscando abogado de guardia en línea.');
     
-    const emerId = Math.random().toString(36).substr(2, 6).toUpperCase();
+    const emerId = generateUUIDv4();
     const dailyUrlGenerated = `https://iframe.daily.co/secureflow-abogado-${emerId.toLowerCase()}`;
     const newEmergency: Emergency = {
       id: emerId,
@@ -1656,7 +1664,7 @@ export default function App() {
       `• Comisión SecureFlow: $${platformFee.toFixed(2)} USD (20%)\n\n` +
       `¿Proceder con el despacho médico inmediato?`,
       async () => {
-        const emerId = 'AMB-' + Math.random().toString(36).substr(2, 4).toUpperCase();
+        const emerId = generateUUIDv4();
         
         const initialMeta = {
           citizenName: citizenProfile.name || 'Ciudadano',
@@ -1725,7 +1733,7 @@ export default function App() {
         setMedicState('calling');
         setIsMedicWindowOpen(false);
         setIsMedicDailyCoActive(false);
-        const emerId = 'MED-' + Math.random().toString(36).substr(2, 6).toUpperCase();
+        const emerId = generateUUIDv4();
         
         setMedicMessages([]);
 
@@ -2132,7 +2140,7 @@ export default function App() {
       `• Comisión SecureFlow: $${platformFee.toFixed(2)} USD (20%)\n\n` +
       `¿Deseas confirmar el despacho del servicio y abrir el chat de asistencia?`,
       async () => {
-        const emerId = 'VIAL-' + Math.random().toString(36).substr(2, 4).toUpperCase();
+        const emerId = generateUUIDv4();
         
         const initialMeta = {
           citizenName: citizenProfile.name || 'Ciudadano',
@@ -4525,7 +4533,7 @@ export default function App() {
                                 title="Daily.co Lawyer WebRTC Stream"
                               />
                               <div className="absolute top-2 left-2 bg-black/75 px-2 py-0.5 rounded text-[8px] text-red-400 font-mono tracking-wider pointer-events-none z-10 border border-white/5 uppercase">
-                                SALA ACTIVADA: {activeEmergency?.id || 'secureflow-abogado-defensa'}
+                                SALA ACTIVADA: {activeEmergency?.id ? activeEmergency.id.substring(0, 8).toUpperCase() : 'secureflow-abogado-defensa'}
                               </div>
                             </div>
 
@@ -4533,7 +4541,7 @@ export default function App() {
                             <div className="bg-slate-950 rounded-2xl border border-white/5 flex flex-col justify-stretch overflow-hidden">
                               <div className="bg-slate-900 border-b border-white/5 py-1.5 px-3 flex justify-between items-center text-[9px] font-bold text-slate-400">
                                 <span className="uppercase text-indigo-400">💬 CANAL EN DIRECTO CON CIUDADANO</span>
-                                <span className="font-mono text-[8px]">ID: {activeEmergency?.id}</span>
+                                <span className="font-mono text-[8px]">ID: {activeEmergency?.id ? activeEmergency.id.substring(0, 8).toUpperCase() : ''}</span>
                               </div>
 
                               <div className="h-44 overflow-y-auto p-3.5 space-y-2.5">
@@ -4823,7 +4831,7 @@ export default function App() {
                                     <span className="w-1.5 h-1.5 bg-emerald-500 rounded-full animate-ping" />
                                     CONDUCIENDO CON GPS ACTIVO
                                   </span>
-                                  <span className="text-[10px] text-slate-400 font-mono">ID: {activeTowJob.id}</span>
+                                  <span className="text-[10px] text-slate-400 font-mono">ID: {activeTowJob.id.substring(0, 8).toUpperCase()}</span>
                                 </div>
 
                                 {/* Street map tracking simulation */}
@@ -5206,7 +5214,7 @@ export default function App() {
                               <span className="w-1.5 h-1.5 bg-red-500 rounded-full animate-ping" />
                               UNIDAD EN RUTA CON GPS ACTIVO
                             </span>
-                            <span className="text-[10px] text-slate-500">ID: {activeAmbulanceJob.id}</span>
+                            <span className="text-[10px] text-slate-500">ID: {activeAmbulanceJob.id.substring(0, 8).toUpperCase()}</span>
                           </div>
 
                           <div className="space-y-1 bg-slate-950 p-2.5 rounded-2xl border border-slate-800">
@@ -5445,7 +5453,7 @@ export default function App() {
                           <div className="flex justify-between items-center bg-emerald-950/20 p-2 rounded-xl border border-emerald-900/10">
                             <span className="text-[10px] text-emerald-400 font-bold flex items-center gap-1">
                               <span className="w-1.5 h-1.5 bg-emerald-400 rounded-full animate-ping" />
-                              SALA CLÍNICA SECUREFLOW N° {activeMedicEmergency.id}
+                              SALA CLÍNICA SECUREFLOW N° {activeMedicEmergency.id.substring(0, 8).toUpperCase()}
                             </span>
                             <span className="text-[10px] text-slate-500">Paciente: {activeMedicEmergency.citizenName}</span>
                           </div>

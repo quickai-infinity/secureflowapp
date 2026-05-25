@@ -8,8 +8,23 @@ import {
 } from 'lucide-react';
 import { createClient } from '@supabase/supabase-js';
 
-const SUPABASE_URL = (import.meta as any).env.VITE_SUPABASE_URL || 'https://prsopicfepfpcplzwgxr.supabase.co';
-const SUPABASE_ANON_KEY = (import.meta as any).env.VITE_SUPABASE_ANON_KEY || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InByc29waWNmZXBmcGNwbHp3Z3hyIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzQ3NTQ1MDIsImV4cCI6MjA5MDMzMDUwMn0.-0Y_P88_oDkgoD3EQb8109PWlGF7PQsC2RLJ4q5gnAQ';
+let fallbackUrl = 'https://prsopicfepfpcplzwgxr.supabase.co';
+let fallbackKey = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InByc29waWNmZXBmcGNwbHp3Z3hyIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzQ3NTQ1MDIsImV4cCI6MjA5MDMzMDUwMn0.-0Y_P88_oDkgoD3EQb8109PWlGF7PQsC2RLJ4q5gnAQ';
+
+let V_URL = fallbackUrl;
+let V_KEY = fallbackKey;
+
+try {
+  if (typeof import.meta !== 'undefined' && (import.meta as any).env) {
+    V_URL = (import.meta as any).env.VITE_SUPABASE_URL || fallbackUrl;
+    V_KEY = (import.meta as any).env.VITE_SUPABASE_ANON_KEY || fallbackKey;
+  }
+} catch (e) {
+  console.warn("Supabase env reading failed, using hardcoded fallback credentials.", e);
+}
+
+const SUPABASE_URL = V_URL;
+const SUPABASE_ANON_KEY = V_KEY;
 
 export const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
@@ -1508,9 +1523,16 @@ export default function App() {
 
     // Insert row in Supabase emergencias_activas
     try {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) { 
+          alert("Error: Sesión no detectada por Supabase"); 
+          return; 
+      }
+
       await supabase.from('emergencias_activas').insert({
         id: emerId,
-        ciudadano_id: sessionUser?.id || null,
+        tipo_emergencia: 'sos',
+        ciudadano_id: session.user.id,
         sala_webrtc_url: dailyUrlGenerated,
         estado: 'calling',
         ubicacion_texto: citizenProfile.city,

@@ -408,11 +408,19 @@ export default function App() {
         loadProfileFromDb(session.user.id, session.user.email || '');
       } else {
         setSessionUser(null);
+        setActiveDevice('landing');
       }
     });
 
     return () => subscription.unsubscribe();
   }, []);
+
+  // Protected Routes safeguard effect (Forces authentication)
+  useEffect(() => {
+    if (activeDevice !== 'landing' && activeDevice !== 'admin' && !sessionUser) {
+      setActiveDevice('landing');
+    }
+  }, [activeDevice, sessionUser]);
 
   const loadProfileFromDb = async (userId: string, email: string) => {
     try {
@@ -1822,6 +1830,23 @@ export default function App() {
     );
   };
 
+  // Direct access redirection only (No auto-login, complies strictly with production grade rules)
+  const handleDirectAccess = (role: 'citizen' | 'lawyer' | 'driver' | 'ambulance' | 'medic') => {
+    setSelectRole(role);
+    // Dynamic pre-fill helper context or messages if wanted, but do not authenticate.
+    const element = document.getElementById('auth-form-container');
+    if (element) {
+      element.scrollIntoView({ behavior: 'smooth' });
+    }
+    showMaterialAlert('🔑 Rol Seleccionado', `Hemos pre-seleccionado el rol de ${
+      role === 'citizen' ? 'Asegurado (Ciudadano)' :
+      role === 'lawyer' ? 'Abogado Colectivo' :
+      role === 'driver' ? 'Chofer de Grúa' :
+      role === 'ambulance' ? 'Paramédico de Ambulancia' :
+      'Médico de Guardia'
+    }. Por favor, regístrate o inicia sesión con tu cuenta oficial para acceder.`);
+  };
+
   // Supabase Authentication sign up & sign in logic
   const handleAuthSubmit = async () => {
     if (!authEmail.trim() || !authPassword.trim()) {
@@ -2777,7 +2802,7 @@ export default function App() {
 
                     <div className="grid grid-cols-1 gap-2.5">
                       <button 
-                        onClick={() => setActiveDevice('citizen')}
+                        onClick={() => handleDirectAccess('citizen')}
                         className="w-full bg-immersive-card hover:opacity-90 p-4 rounded-2xl border border-white/5 text-left transition-all flex items-center justify-between group"
                       >
                         <div className="flex items-center gap-3">
@@ -2793,7 +2818,7 @@ export default function App() {
                       </button>
 
                       <button 
-                        onClick={() => setActiveDevice('lawyer')}
+                        onClick={() => handleDirectAccess('lawyer')}
                         className="w-full bg-immersive-card hover:opacity-90 p-4 rounded-2xl border border-white/5 text-left transition-all flex items-center justify-between group"
                       >
                         <div className="flex items-center gap-3">
@@ -2809,7 +2834,7 @@ export default function App() {
                       </button>
 
                       <button 
-                        onClick={() => setActiveDevice('driver')}
+                        onClick={() => handleDirectAccess('driver')}
                         className="w-full bg-immersive-card hover:opacity-90 p-4 rounded-2xl border border-white/5 text-left transition-all flex items-center justify-between group"
                       >
                         <div className="flex items-center gap-3">
@@ -2825,7 +2850,7 @@ export default function App() {
                       </button>
 
                       <button 
-                        onClick={() => setActiveDevice('ambulance')}
+                        onClick={() => handleDirectAccess('ambulance')}
                         className="w-full bg-immersive-card hover:opacity-90 p-4 rounded-2xl border border-white/5 text-left transition-all flex items-center justify-between group"
                       >
                         <div className="flex items-center gap-3">
@@ -2841,7 +2866,7 @@ export default function App() {
                       </button>
 
                       <button 
-                        onClick={() => setActiveDevice('medic')}
+                        onClick={() => handleDirectAccess('medic')}
                         className="w-full bg-immersive-card hover:opacity-90 p-4 rounded-2xl border border-white/5 text-left transition-all flex items-center justify-between group"
                       >
                         <div className="flex items-center gap-3">
@@ -2858,7 +2883,7 @@ export default function App() {
                     </div>
 
                     {/* Real Supabase Auth container (MD3 styling) */}
-                    <div className="p-4 bg-immersive-frame rounded-2xl border border-white/5 mt-2">
+                    <div id="auth-form-container" className="p-4 bg-immersive-frame rounded-2xl border border-white/5 mt-2">
                       <div className="flex bg-immersive-dark rounded-xl p-1 border border-white/5 mb-3.5">
                         <button 
                           onClick={() => setIsRegisterMode(false)}
@@ -3179,7 +3204,7 @@ export default function App() {
               )}
 
               {/* ---------------- SCREEN 2: CITIZEN APP ENGINE ---------------- */}
-              {activeDevice === 'citizen' && (
+              {activeDevice === 'citizen' && sessionUser && (
                 <div className="flex-1 flex flex-col justify-stretch">
                   
                   {/* Top screen header */}
@@ -4240,7 +4265,7 @@ export default function App() {
               )}
 
               {/* ---------------- SCREEN 3: LAWYER PORTAL ---------------- */}
-              {activeDevice === 'lawyer' && (
+              {activeDevice === 'lawyer' && sessionUser && (
                 <div className="flex-1 flex flex-col justify-stretch">
                   
                   {/* Top Header */}
@@ -4549,7 +4574,7 @@ export default function App() {
               )}
 
               {/* ---------------- SCREEN 4: TOW TRUCK PANEL ---------------- */}
-              {activeDevice === 'driver' && (
+              {activeDevice === 'driver' && sessionUser && (
                 <div className="flex-1 flex flex-col justify-stretch">
                   
                   {/* Top Bar */}
@@ -4929,7 +4954,7 @@ export default function App() {
               )}
 
               {/* ---------------- SCREEN 6: AMBULANCE DISPATCH & MEDICAL GUARD PORTAL ---------------- */}
-              {activeDevice === 'ambulance' && (
+              {activeDevice === 'ambulance' && sessionUser && (
                 <div className="flex-1 flex flex-col justify-stretch">
                   {/* Top Bar */}
                   <div className="bg-slate-900 border-b border-slate-800/60 px-4 py-3 shrink-0 flex justify-between items-center z-10">
@@ -5127,7 +5152,7 @@ export default function App() {
               )}
 
               {/* ---------------- SCREEN 7: DOCTOR GUARD PORTAL ---------------- */}
-              {activeDevice === 'medic' && (
+              {activeDevice === 'medic' && sessionUser && (
                 <div className="flex-1 flex flex-col justify-stretch">
                   {/* Top Bar */}
                   <div className="bg-slate-900 border-b border-slate-800/60 px-4 py-3 shrink-0 flex justify-between items-center z-10">

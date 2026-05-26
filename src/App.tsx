@@ -574,7 +574,7 @@ export default function App() {
       const { data } = await supabase
         .from('emergencias_activas')
         .select('*')
-        .eq('estado', 'calling');
+        .eq('estado', 'buscando');
       
       if (data && data.length > 0) {
         const active = data[0];
@@ -604,7 +604,7 @@ export default function App() {
         const { data: activeList } = await supabase
           .from('emergencias_activas')
           .select('*')
-          .eq('estado', 'active')
+          .eq('estado', 'activa')
           .eq('asignado_id', sessionUser.id);
 
         if (activeList && activeList.length > 0) {
@@ -698,11 +698,11 @@ export default function App() {
       .channel(`citizen-lawyer-${activeEmergency.id}`)
       .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'emergencias_activas', filter: `id=eq.${activeEmergency.id}` }, (payload) => {
         const updated = payload.new;
-        if (updated.estado === 'active') {
+        if (updated.estado === 'active' || updated.estado === 'activa') {
           setSosState('active');
           setIsLiveVideoActive(true);
           setIsLawyerDailyCoActive(true);
-        } else if (updated.estado === 'completed') {
+        } else if (updated.estado === 'completed' || updated.estado === 'resuelta') {
           setIsLiveVideoActive(false);
           setSosState('idle');
           setActiveEmergency(null);
@@ -1574,7 +1574,7 @@ export default function App() {
         ciudadano_id: session.user.id,
         sala_webrtc_url: dailyUrlGenerated,
         daily_room_url: dailyUrlGenerated,
-        estado: 'calling',
+        estado: 'buscando',
         ubicacion_texto: citizenProfile.city || '',
         ubicacion_lat: citizenCoords.lat,
         ubicacion_lng: citizenCoords.lng,
@@ -1594,7 +1594,7 @@ export default function App() {
         const fallbackDetails = {
           id: emerId,
           ciudadano_id: session.user.id,
-          estado: 'calling',
+          estado: 'buscando',
           ubicacion_texto: citizenProfile.city || '',
           ubicacion_lat: citizenCoords.lat,
           ubicacion_lng: citizenCoords.lng,
@@ -2240,10 +2240,10 @@ export default function App() {
     
     setIsAuthLoading(true);
     try {
-      const { error } = await supabase
+       const { error } = await supabase
         .from('emergencias_activas')
         .update({ 
-          estado: 'active', 
+          estado: 'activa', 
           asignado_id: sessionUser?.id || null,
           tarifa_aplicada: proposedTariff 
         })
@@ -2288,7 +2288,7 @@ export default function App() {
           // Resolve emergency row
           const { error: updateErr } = await supabase
             .from('emergencias_activas')
-            .update({ estado: 'completed' })
+            .update({ estado: 'resuelta' })
             .eq('id', activeEmergency.id);
 
           if (updateErr) throw updateErr;

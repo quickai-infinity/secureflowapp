@@ -1977,9 +1977,10 @@ export default function App() {
           tipo_vehiculo: citizenVehicleType || 'coche',
           inpreabogado: impreAbogadoField || '',
           ciudad: citizenProfile.city || 'Caracas',
+          cedula: ciudadanoIdField || '',
           especialidad: selectRole === 'lawyer' ? 'Defensa Penal' : (selectRole === 'medic' ? 'Triaje de Guardia' : ''),
-          // Keep supplementary fields compatible
-          impre_abogado: impreAbogadoField || null,
+          // Supplementary fields to remain fully backwards/trigger compatible
+          impre_bogado: impreAbogadoField || null,
           ciudadano_id: ciudadanoIdField || null,
           grua_id: gruaIdField || null,
           credential_ambulance: credentialAmbulanceField || null,
@@ -2001,29 +2002,40 @@ export default function App() {
           const uId = authData.user.id;
           const chosenRole = selectRole;
 
-          // Insert into 'usuarios' Table
-          const { error: dbErr } = await supabase.from('usuarios').insert({
-            auth_id: uId,
-            rol: dbRole,
-            role: dbRole,
-            nombre_completo: finalName,
-            tipo_vehiculo: chosenRole === 'citizen' ? citizenVehicleType : null,
-            vehicle_selection: chosenRole === 'citizen' ? citizenVehicleType : null,
-            contacto_emergencia_1_nombre: alertContacts.name1 || 'Mi Madre',
-            contacto_emergencia_1_telefono: alertContacts.tel1 || '584249998877',
-            contacto_emergencia_2_nombre: alertContacts.name2 || 'Mi Hermano',
-            contacto_emergencia_2_telefono: alertContacts.tel2 || '584126665544'
-          });
+          // If NOT lawyer, upsert into 'usuarios' Table (Trigger covers 'citizen', but upsert/onConflict is completely safe)
+          if (chosenRole !== 'lawyer') {
+            const { error: dbErr } = await supabase.from('usuarios').upsert({
+              id: uId,
+              auth_id: uId,
+              rol: dbRole,
+              role: dbRole,
+              nombre_completo: finalName,
+              telefono: finalPhone,
+              cedula: ciudadanoIdField || '',
+              email: authEmail.trim(),
+              tipo_vehiculo: chosenRole === 'citizen' ? citizenVehicleType : null,
+              vehicle_selection: chosenRole === 'citizen' ? citizenVehicleType : null,
+              contacto_emergencia_1_nombre: alertContacts.name1 || 'Mi Madre',
+              contacto_emergencia_1_telefono: alertContacts.tel1 || '584249998877',
+              contacto_emergencia_2_nombre: alertContacts.name2 || 'Mi Hermano',
+              contacto_emergencia_2_telefono: alertContacts.tel2 || '584126665544'
+            });
 
-          if (dbErr) throw dbErr;
+            if (dbErr) {
+              console.warn('Non-blocking usuarios upsert info:', dbErr);
+            }
 
-          // Insert into 'saldos' Table
-          await supabase.from('saldos').insert({
-            usuario_id: uId,
-            plan_activo: 'estandar',
-            creditos_disponibles: 35.0,
-            consultas_ia_usadas: 0
-          });
+            // Upsert into 'saldos' Table
+            const { error: sldErr } = await supabase.from('saldos').upsert({
+              usuario_id: uId,
+              plan_activo: 'estandar',
+              creditos_disponibles: 35.0,
+              consultas_ia_usadas: 0
+            });
+            if (sldErr) {
+              console.warn('Non-blocking saldos upsert info:', sldErr);
+            }
+          }
 
           // Initialize professional balances to avoid empty rows
           if (chosenRole === 'driver') {
@@ -2048,11 +2060,21 @@ export default function App() {
 
           // Create complementary tables matching schemas
           if (chosenRole === 'lawyer') {
-            await supabase.from('abogados').insert({
+            // Upsert into abogados table to complement trigger registration gracefully
+            const { error: abgErr } = await supabase.from('abogados').upsert({
+              id: uId,
               auth_id: uId,
               nombre_completo: finalName,
-              tarifa_sesion: 15
+              telefono: finalPhone,
+              email: authEmail.trim(),
+              ciudad: citizenProfile.city || 'Caracas',
+              inpreabogado: impreAbogadoField || '',
+              especialidad: 'Defensa Penal'
             });
+            if (abgErr) {
+              console.warn('Non-blocking abogados upsert info:', abgErr);
+            }
+            
             setLawyerProfile(prev => ({
               ...prev,
               name: finalName,
@@ -2060,11 +2082,12 @@ export default function App() {
               specialty: 'Derecho Procesal & Penal'
             }));
           } else if (chosenRole === 'driver') {
-            await supabase.from('grueros').insert({
+            await supabase.from('grueros').upsert({
+              id: uId,
               auth_id: uId,
               nombre_completo: finalName,
               placa_vehiculo: gruaIdField || 'A92B45X',
-              telefono: citizenProfile.phone || '584241234567',
+              telefono: finalPhone,
               deuda_comisiones: 0
             });
             setDriverProfile(prev => ({
@@ -2076,7 +2099,7 @@ export default function App() {
             setCitizenProfile(prev => ({
               ...prev,
               name: finalName,
-              phone: citizenProfile.phone || '584241234567'
+              phone: finalPhone
             }));
           } else if (chosenRole === 'ambulance') {
             setAmbulanceProfile(prev => ({

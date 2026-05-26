@@ -5412,6 +5412,49 @@ export default function App() {
                 </div>
               )}
 
+              {/* FALLBACK SAFETY RED DE SEGURIDAD TO PREVENT BLANK SCREEN */}
+              {((['citizen', 'lawyer', 'driver', 'ambulance', 'medic'].includes(activeDevice) && !sessionUser) || 
+                !['citizen', 'lawyer', 'driver', 'ambulance', 'medic', 'admin', 'landing'].includes(activeDevice)) && (
+                <div className="flex-1 flex flex-col items-center justify-center p-6 bg-slate-950 text-center animate-fade-in my-auto min-h-[350px]">
+                  <div className="w-16 h-16 rounded-full bg-red-500/10 border border-red-500/20 flex items-center justify-center text-red-400 text-2xl mb-4">
+                    ⚠️
+                  </div>
+                  <h3 className="text-base font-black text-white uppercase tracking-tight">Fallo de Renderizado / Sesión</h3>
+                  <p className="text-xs text-slate-400 mt-2 max-w-[280px] leading-relaxed">
+                    Se ha detectado un desfase de sincronización en tu estado de sesión o rol visual (Vista: <span className="font-mono text-amber-400 font-bold">{activeDevice}</span>).
+                  </p>
+                  
+                  <div className="mt-6 flex flex-col gap-2.5 w-full max-w-[240px]">
+                    <button
+                      onClick={async () => {
+                        if (sessionUser) {
+                          await loadProfileFromDb(sessionUser.id, sessionUser.email || '');
+                        } else {
+                          // Direct fallback check
+                          const { data: sessionData } = await supabase.auth.getSession();
+                          if (sessionData?.session?.user) {
+                            setSessionUser(sessionData.session.user);
+                            await loadProfileFromDb(sessionData.session.user.id, sessionData.session.user.email || '');
+                          } else {
+                            setActiveDevice('landing');
+                          }
+                        }
+                      }}
+                      className="w-full bg-blue-600 hover:bg-blue-500 text-white font-bold py-2 px-4 rounded-xl text-xs uppercase cursor-pointer"
+                    >
+                      🔄 Reintentar Cargar
+                    </button>
+                    
+                    <button
+                      onClick={handleSignOut}
+                      className="w-full bg-slate-900 hover:bg-slate-800 border border-white/5 text-slate-300 font-bold py-2 px-4 rounded-xl text-xs uppercase cursor-pointer"
+                    >
+                      🚪 Cerrar Sesión
+                    </button>
+                  </div>
+                </div>
+              )}
+
             </div>
 
             {/* Android Navigation gesture pillow bar */}

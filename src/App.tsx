@@ -4920,6 +4920,15 @@ export default function App() {
                       </div>
                       <span className="text-xs font-black tracking-tight text-white uppercase">Control de Dios Admin</span>
                     </div>
+
+                    <div className="flex items-center gap-2">
+                      <button 
+                        onClick={handleSignOut}
+                        className="bg-red-950 hover:bg-red-900 text-red-400 text-[10px] font-bold px-2.5 py-1 rounded-xl border border-red-900/20 active:scale-95 transition-all uppercase cursor-pointer"
+                      >
+                        Salir / Cerrar Sesión
+                      </button>
+                    </div>
                   </div>
 
                   {/* Body contents */}

@@ -1,6 +1,9 @@
 import express from "express";
 import path from "path";
 import { createServer as createViteServer } from "vite";
+import dotenv from "dotenv";
+
+dotenv.config();
 
 async function startServer() {
   const app = express();
@@ -57,21 +60,16 @@ async function startServer() {
     try {
       const apiKey = process.env.DAILY_API_KEY;
       if (!apiKey) {
-        console.warn("[DAILY WARNING] DAILY_API_KEY is not defined. Using generated secure fallback URL.");
-        // Non-blocking fallback for local preview or development when secrets are not yet fully bound
-        const generatedId = "sf-room-" + Math.random().toString(36).substring(2, 12);
-        return res.json({ 
-          url: `https://iframe.daily.co/${generatedId}`, 
-          name: generatedId,
-          warning: "DAILY_API_KEY is missing, using unique fallback"
+        console.error("[DAILY ERROR] DAILY_API_KEY is not defined in process.env");
+        return res.status(400).json({ 
+          error: "DAILY_API_KEY no configurado en el servidor",
+          details: "Por favor define la variable de entorno DAILY_API_KEY en la configuración de tu aplicación."
         });
       }
 
-      const { prefix } = req.body;
-      const uniqueSuffix = Math.random().toString(36).substring(2, 10);
-      const roomName = `${prefix || "secureflow"}-${uniqueSuffix}`;
-
-      console.log(`[DAILY] Requesting room creation for: ${roomName}`);
+      // El nombre debe estar compuesto por caracteres permitidos (letras, números y guión bajo)
+      const roomName = `secureflow_${Date.now()}`;
+      console.log(`[DAILY] Realizando llamada real a Daily.co API para crear sala: ${roomName}`);
 
       const dailyResponse = await fetch("https://api.daily.co/v1/rooms", {
         method: "POST",
@@ -84,32 +82,31 @@ async function startServer() {
           properties: {
             enable_chat: true,
             start_audio_off: false,
-            start_video_off: false,
-            exp: Math.floor(Date.now() / 1000) + 7200 // Expires in 2 hours
+            start_video_off: false
           }
         })
       });
 
       if (!dailyResponse.ok) {
         const errText = await dailyResponse.text();
-        console.error(`[DAILY ERROR] Code ${dailyResponse.status}:`, errText);
-        throw new Error(`Daily.co backend returned error: ${errText}`);
+        console.error(`[DAILY ERROR] Error ${dailyResponse.status} devuelto por Daily.co:`, errText);
+        return res.status(dailyResponse.status).json({
+          error: `Error de la API de Daily.co (Código ${dailyResponse.status})`,
+          details: errText
+        });
       }
 
       const roomData = await dailyResponse.json();
-      console.log(`[DAILY SUCCESS] Room created successfully: ${roomData.url}`);
+      console.log(`[DAILY SUCCESS] Sala WebRTC real creada exitosamente: ${roomData.url}`);
       return res.json({
         url: roomData.url,
         name: roomData.name
       });
     } catch (err: any) {
-      console.error("[DAILY API ERROR]", err);
-      // Fallback fallback to ensure frontend does not block completely if Daily.co API is down
-      const emergencyId = "sf-backup-" + Math.random().toString(36).substring(2, 10);
-      return res.json({
-        url: `https://iframe.daily.co/${emergencyId}`,
-        name: emergencyId,
-        error: err.message
+      console.error("[DAILY API ERROR EXCEPTION]", err);
+      return res.status(500).json({
+        error: "Excepción interna del servidor al de crear sala en Daily.co",
+        details: err.message
       });
     }
   });

@@ -703,6 +703,16 @@ export default function App() {
           setSosState('active');
           setIsLiveVideoActive(true);
           setIsLawyerDailyCoActive(true);
+          // Actualizamos la URL real de la sala desde el payload de Supabase
+          setActiveEmergency(prev => {
+            if (!prev) return null;
+            const liveUrl = updated.daily_room_url || updated.sala_webrtc_url || prev.dailyRoomUrl;
+            console.log('[CITIZEN REALTIME SYNC] Sincronizando URL real de la sala:', liveUrl);
+            return {
+              ...prev,
+              dailyRoomUrl: liveUrl
+            };
+          });
         } else if (updated.estado === 'completed' || updated.estado === 'resuelta') {
           setIsLiveVideoActive(false);
           setSosState('idle');
@@ -1527,18 +1537,27 @@ export default function App() {
     try {
       const roomResponse = await fetch('/api/rooms', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ prefix: `abogado-${emerId.toLowerCase().substring(0, 8)}` })
+        headers: { 'Content-Type': 'application/json' }
       });
       if (roomResponse.ok) {
         const roomData = await roomResponse.json();
         if (roomData.url) {
           dailyUrlGenerated = roomData.url;
           console.log('[SOS WebRTC] Sala oficial de Daily.co creada con éxito:', dailyUrlGenerated);
+        } else {
+          throw new Error('La API de Daily.co no retornó una URL válida de reunión.');
         }
+      } else {
+        const errJson = await roomResponse.json().catch(() => ({}));
+        const errMsg = errJson.details || errJson.error || 'Falta configuración en backend.';
+        throw new Error(errMsg);
       }
-    } catch (e) {
-      console.warn('[SOS WebRTC WARNING] Error al conectar con /api/rooms. Usando fallback pre-calculado:', e);
+    } catch (e: any) {
+      console.warn('[SOS WebRTC ERROR] Error al conectar con /api/rooms. Mostrando alerta al operador:', e);
+      showMaterialAlert(
+        '⚠️ Configuración WebRTC Requerida',
+        `No se pudo crear una sala dinámica real en los servidores de Daily.co. Verifica que la variable DAILY_API_KEY esté correctamente guardada en el backend.\n\nDetalle: ${e.message}`
+      );
     }
 
     const newEmergency: Emergency = {

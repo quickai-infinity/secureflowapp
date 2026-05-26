@@ -138,6 +138,18 @@ interface TowJob {
   distance: number;
 }
 
+// Support mapping both English and Spanish term variations to corresponding layouts
+const getNormalizedRole = (role: string): 'citizen' | 'lawyer' | 'driver' | 'ambulance' | 'medic' | 'admin' => {
+  const r = (role || '').toLowerCase().trim();
+  if (r === 'lawyer' || r === 'abogado' || r === 'abogado colectivo') return 'lawyer';
+  if (r === 'citizen' || r === 'ciudadano' || r === 'civil' || r === 'asegurado') return 'citizen';
+  if (r === 'driver' || r === 'chofer' || r === 'gruero' || r === 'conductor') return 'driver';
+  if (r === 'ambulance' || r === 'ambulancia' || r === 'paramedico') return 'ambulance';
+  if (r === 'medic' || r === 'medico' || r === 'doctor') return 'medic';
+  if (r === 'admin' || r === 'administrador') return 'admin';
+  return 'citizen'; // default fallback for logged-in users
+};
+
 export default function App() {
   // Navigation & Role states
   const [activeDevice, setActiveDevice] = useState<'citizen' | 'lawyer' | 'driver' | 'admin' | 'landing' | 'ambulance' | 'medic'>('landing');
@@ -424,14 +436,32 @@ export default function App() {
 
   const loadProfileFromDb = async (userId: string, email: string) => {
     try {
+      // Precise Role Reading: Fetching user data matching either auth_id or id safely
       const { data: userData } = await supabase
         .from('usuarios')
         .select('*')
-        .eq('auth_id', userId)
+        .or(`auth_id.eq.${userId},id.eq.${userId}`)
         .maybeSingle();
 
+      // Retrieve dynamic raw role supporting both 'rol' and 'role' fields
+      let rawRole = '';
       if (userData) {
-        const finalRole = userData.rol;
+        rawRole = userData.rol || userData.role || '';
+      }
+      
+      // Secondary fallback lookup via session user metadata to ensure 100% reliability
+      if (!rawRole) {
+        const { data: sessionData } = await supabase.auth.getSession();
+        const userMeta = sessionData?.session?.user?.user_metadata;
+        if (userMeta) {
+          rawRole = userMeta.rol || userMeta.role || '';
+        }
+      }
+
+      // Safeguard fallback: if completely unknown, default to citizen
+      const finalRole = getNormalizedRole(rawRole || 'citizen');
+
+      if (userData) {
         if (finalRole === 'citizen') {
           setCitizenProfile({
             name: userData.nombre_completo,
@@ -514,8 +544,10 @@ export default function App() {
             setMedicBalanceClean(Number(sm.balance) || 0.00);
           }
         }
-        setActiveDevice(finalRole as any);
       }
+
+      // Strict post-login redirection based on the exact mapped role state
+      setActiveDevice(finalRole);
 
       // Fetch balance from 'saldos'
       const { data: saldoData } = await supabase

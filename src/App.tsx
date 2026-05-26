@@ -4,7 +4,7 @@ import {
   MapPin, Video, Bell, Cloud, Truck, DollarSign, Send, LogIn, 
   ArrowLeft, RefreshCw, Smartphone, Laptop, CheckCircle, Info, 
   Volume2, Mic, Play, Power, HelpCircle, X, ChevronRight, Scale,
-  Activity, Heart
+  Activity, Heart, LogOut
 } from 'lucide-react';
 import { createClient } from '@supabase/supabase-js';
 
@@ -2750,6 +2750,18 @@ export default function App() {
   return (
     <div className="min-h-screen bg-[#0d0f14] text-slate-100 flex flex-col md:flex-row items-center justify-center font-sans select-none overflow-x-hidden md:p-4">
       
+      {/* GLOBAL FIXED SUPERIOR LOGOUT BUTTON (ANTI-BLACKOUT RED DE SEGURIDAD) */}
+      {sessionUser && (
+        <button
+          onClick={handleSignOut}
+          className="fixed top-4 right-4 z-[99999] bg-rose-600 hover:bg-rose-700 active:scale-95 text-white text-xs font-black tracking-widest px-4 py-3 rounded-2xl shadow-[0_0_30px_rgba(225,29,72,0.4)] border border-rose-500/30 transition-all flex items-center gap-2 cursor-pointer uppercase select-none"
+          title="Forzar Cierre de Sesión"
+        >
+          <LogOut className="w-4 h-4 text-rose-100 animate-pulse" />
+          <span>Cerrar Sesión</span>
+        </button>
+      )}
+      
       {/* Active Floating Simulated Push Notification banner */}
       {systemNotification && (
         <div className="fixed top-4 left-4 right-4 md:left-auto md:right-4 md:w-[360px] bg-[#1E212B]/95 border-l-4 border-blue-500 p-4 rounded-xl shadow-2xl z-50 flex items-start gap-3 backdrop-blur-md animate-bounce">
@@ -5421,25 +5433,71 @@ export default function App() {
                 </div>
               )}
 
-              {/* FALLBACK SAFETY RED DE SEGURIDAD TO PREVENT BLANK SCREEN */}
-              {((['citizen', 'lawyer', 'driver', 'ambulance', 'medic'].includes(activeDevice) && !sessionUser) || 
-                !['citizen', 'lawyer', 'driver', 'ambulance', 'medic', 'admin', 'landing'].includes(activeDevice)) && (
-                <div className="flex-1 flex flex-col items-center justify-center p-6 bg-slate-950 text-center animate-fade-in my-auto min-h-[350px]">
-                  <div className="w-16 h-16 rounded-full bg-red-500/10 border border-red-500/20 flex items-center justify-center text-red-400 text-2xl mb-4">
+              {/* FALLBACK SAFETY RED DE SEGURIDAD TO PREVENT BLANK SCREEN OR WRONG ROUTING */}
+              {(!['landing', 'citizen', 'lawyer', 'driver', 'admin', 'ambulance', 'medic'].includes(activeDevice) || 
+                (sessionUser && activeDevice === 'landing') || 
+                (!sessionUser && ['citizen', 'lawyer', 'driver', 'admin', 'ambulance', 'medic'].includes(activeDevice))) && (
+                <div className="flex-1 flex flex-col items-center justify-center p-6 bg-[#090b0f] text-center animate-fade-in my-auto min-h-[500px] overflow-y-auto scrollbar-thin">
+                  <div className="w-16 h-16 rounded-full bg-rose-500/10 border border-rose-500/20 flex items-center justify-center text-rose-450 text-3xl mb-4 animate-pulse">
                     ⚠️
                   </div>
-                  <h3 className="text-base font-black text-white uppercase tracking-tight">Fallo de Renderizado / Sesión</h3>
-                  <p className="text-xs text-slate-400 mt-2 max-w-[280px] leading-relaxed">
-                    Se ha detectado un desfase de sincronización en tu estado de sesión o rol visual (Vista: <span className="font-mono text-amber-400 font-bold">{activeDevice}</span>).
+                  <h3 className="text-base font-black text-white uppercase tracking-tight">Red de Seguridad de Flujo</h3>
+                  <p className="text-xs text-slate-400 mt-2 max-w-[320px] leading-relaxed">
+                    Se ha detectado un estado indefinido o asíncrono en tu sesión. 
+                    (Vista actual interna: <span className="font-mono text-amber-400 font-bold">{activeDevice}</span> | Sesión: <span className="font-mono text-blue-400 font-medium">{sessionUser ? 'Activa' : 'Inactiva'}</span>)
                   </p>
                   
-                  <div className="mt-6 flex flex-col gap-2.5 w-full max-w-[240px]">
+                  {/* Emergency Manual Role Override Grid for rescue */}
+                  {sessionUser && (
+                    <div className="mt-5 w-full max-w-[320px] space-y-2.5 bg-slate-900/50 p-4 rounded-2xl border border-white/5">
+                      <span className="text-[9px] text-slate-500 font-bold uppercase tracking-wider block">⚠️ RESTAURACIÓN MANUAL DE PANEL</span>
+                      <div className="grid grid-cols-2 gap-2">
+                        <button 
+                          onClick={() => setActiveDevice('lawyer')} 
+                          className="py-2 px-1 text-[10px] font-bold bg-amber-500/10 hover:bg-amber-500/20 text-amber-400 rounded-xl border border-amber-500/20 transition-all cursor-pointer"
+                        >
+                          ⚖️ Abogado [lawyer]
+                        </button>
+                        <button 
+                          onClick={() => setActiveDevice('citizen')} 
+                          className="py-2 px-1 text-[10px] font-bold bg-blue-500/10 hover:bg-blue-500/20 text-blue-450 rounded-xl border border-blue-500/20 transition-all cursor-pointer"
+                        >
+                          📱 Ciudadano [citizen]
+                        </button>
+                        <button 
+                          onClick={() => setActiveDevice('driver')} 
+                          className="py-2 px-1 text-[10px] font-bold bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-450 rounded-xl border border-emerald-500/20 transition-all cursor-pointer"
+                        >
+                          🚜 Grúa [driver]
+                        </button>
+                        <button 
+                          onClick={() => setActiveDevice('medic')} 
+                          className="py-2 px-1 text-[10px] font-bold bg-teal-500/10 hover:bg-teal-500/20 text-teal-450 rounded-xl border border-teal-500/20 transition-all cursor-pointer"
+                        >
+                          🏥 Médico [medic]
+                        </button>
+                        <button 
+                          onClick={() => setActiveDevice('ambulance')} 
+                          className="py-2 px-1 text-[10px] font-bold bg-rose-500/10 hover:bg-rose-500/20 text-rose-450 rounded-xl border border-rose-500/20 transition-all cursor-pointer"
+                        >
+                          🚨 Ambulancia
+                        </button>
+                        <button 
+                          onClick={() => setActiveDevice('admin')} 
+                          className="py-2 px-1 text-[10px] font-bold bg-slate-800 hover:bg-slate-750 text-slate-300 rounded-xl border border-white/5 transition-all cursor-pointer"
+                        >
+                          👑 Admin [admin]
+                        </button>
+                      </div>
+                    </div>
+                  )}
+
+                  <div className="mt-6 flex flex-col gap-2.5 w-full max-w-[280px]">
                     <button
                       onClick={async () => {
                         if (sessionUser) {
                           await loadProfileFromDb(sessionUser.id, sessionUser.email || '');
                         } else {
-                          // Direct fallback check
                           const { data: sessionData } = await supabase.auth.getSession();
                           if (sessionData?.session?.user) {
                             setSessionUser(sessionData.session.user);
@@ -5449,16 +5507,16 @@ export default function App() {
                           }
                         }
                       }}
-                      className="w-full bg-blue-600 hover:bg-blue-500 text-white font-bold py-2 px-4 rounded-xl text-xs uppercase cursor-pointer"
+                      className="w-full bg-blue-600 hover:bg-blue-500 text-white font-bold py-3 px-4 rounded-xl text-xs uppercase cursor-pointer tracking-wider"
                     >
-                      🔄 Reintentar Cargar
+                      🔄 Reintentar / Cargar Perfil
                     </button>
                     
                     <button
                       onClick={handleSignOut}
-                      className="w-full bg-slate-900 hover:bg-slate-800 border border-white/5 text-slate-300 font-bold py-2 px-4 rounded-xl text-xs uppercase cursor-pointer"
+                      className="w-full bg-rose-600 hover:bg-rose-700 text-white font-bold py-3 px-4 rounded-xl text-xs uppercase cursor-pointer tracking-wider shadow-[0_4px_15px_rgba(225,29,72,0.3)] animate-pulse"
                     >
-                      🚪 Cerrar Sesión
+                      🚪 Cerrar Sesión y Salir
                     </button>
                   </div>
                 </div>

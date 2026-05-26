@@ -1924,13 +1924,23 @@ export default function App() {
       }
 
       try {
+        const dbRole = selectRole === 'lawyer' ? 'abogado' :
+                       selectRole === 'citizen' ? 'ciudadano' :
+                       selectRole === 'driver' ? 'conductor' :
+                       selectRole === 'ambulance' ? 'paramedico' :
+                       selectRole === 'medic' ? 'medico' : selectRole;
+
+        const finalName = citizenProfile.name || 'Usuario SecureFlow';
+
         const { data: authData, error: authErr } = await supabase.auth.signUp({
           email: authEmail.trim(),
           password: authPassword.trim(),
           options: {
             data: {
-              nombre_completo: citizenProfile.name || 'Usuario SecureFlow',
-              rol: selectRole,
+              role: dbRole,
+              rol: dbRole,
+              full_name: finalName,
+              nombre_completo: finalName,
               impre_abogado: impreAbogadoField || null,
               ciudadano_id: ciudadanoIdField || null,
               grua_id: gruaIdField || null,
@@ -1946,12 +1956,12 @@ export default function App() {
         if (authData?.user) {
           const uId = authData.user.id;
           const chosenRole = selectRole;
-          const finalName = citizenProfile.name || 'Usuario SecureFlow';
 
           // Insert into 'usuarios' Table
           const { error: dbErr } = await supabase.from('usuarios').insert({
             auth_id: uId,
-            rol: chosenRole,
+            rol: dbRole,
+            role: dbRole,
             nombre_completo: finalName,
             tipo_vehiculo: chosenRole === 'citizen' ? citizenVehicleType : null,
             vehicle_selection: chosenRole === 'citizen' ? citizenVehicleType : null,

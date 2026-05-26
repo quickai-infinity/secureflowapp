@@ -1569,26 +1569,63 @@ export default function App() {
           return; 
       }
 
-      await supabase.from('emergencias_activas').insert({
+      const insertDetails = {
         id: emerId,
-        tipo_emergencia: 'sos',
         ciudadano_id: session.user.id,
         sala_webrtc_url: dailyUrlGenerated,
+        daily_room_url: dailyUrlGenerated,
         estado: 'calling',
-        ubicacion_texto: citizenProfile.city,
+        ubicacion_texto: citizenProfile.city || '',
         ubicacion_lat: citizenCoords.lat,
         ubicacion_lng: citizenCoords.lng,
         tarifa_aplicada: sosCostRate
-      });
+      };
 
-      // Guardar el enlace mediante un UPDATE en la columna 'daily_room_url'
-      await supabase
+      console.log('Inserting payload to emergencias_activas:', insertDetails);
+
+      const { data, error } = await supabase
         .from('emergencias_activas')
-        .update({ daily_room_url: dailyUrlGenerated })
-        .eq('id', emerId);
+        .insert(insertDetails)
+        .select();
+
+      if (error) {
+        console.error('🚨 SUPABASE_SOS_INSERT_ERROR DETAILS:', error);
+        // Fallback update schema attempt (in case select fails or columns differ)
+        const fallbackDetails = {
+          id: emerId,
+          ciudadano_id: session.user.id,
+          estado: 'calling',
+          ubicacion_texto: citizenProfile.city || '',
+          ubicacion_lat: citizenCoords.lat,
+          ubicacion_lng: citizenCoords.lng,
+          tarifa_aplicada: sosCostRate
+        };
+        console.log('Attempting fallback insertion without WebRTC URL fields first...', fallbackDetails);
+        const { error: fallbackError } = await supabase
+          .from('emergencias_activas')
+          .insert(fallbackDetails);
+          
+        if (fallbackError) {
+          console.error('🚨 SOS_FALLBACK_INSERT_ERROR DETAILS:', fallbackError);
+        } else {
+          // If fallback insert succeeds, do subsequent update of webRTC fields
+          const { error: updateError } = await supabase
+            .from('emergencias_activas')
+            .update({ 
+              sala_webrtc_url: dailyUrlGenerated,
+              daily_room_url: dailyUrlGenerated
+            })
+            .eq('id', emerId);
+          if (updateError) {
+            console.error('🚨 SOS_UPDATE_WEBRTC_ERROR DETAILS:', updateError);
+          }
+        }
+      } else {
+        console.log('Successfully inserted SOS emergency! Data returning:', data);
+      }
 
     } catch (e) {
-      console.error('Error inserting emergency row: ', e);
+      console.error('🚨 Critical/unexpected exception in SOS insert flow: ', e);
     }
   };
 

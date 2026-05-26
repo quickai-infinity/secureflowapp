@@ -576,8 +576,9 @@ export default function App() {
         .select('*')
         .eq('estado', 'buscando');
       
-      if (data && data.length > 0) {
-        const active = data[0];
+      const filteredLawyer = data?.filter(e => e.sala_webrtc_url && e.sala_webrtc_url.includes('daily.co')) || [];
+      if (filteredLawyer.length > 0) {
+        const active = filteredLawyer[0];
         const { data: userData } = await supabase
           .from('usuarios')
           .select('nombre_completo, contacto_emergencia_1_telefono')
@@ -605,7 +606,7 @@ export default function App() {
           .from('emergencias_activas')
           .select('*')
           .eq('estado', 'activa')
-          .eq('asignado_id', sessionUser.id);
+          .eq('abogado_id', sessionUser.id);
 
         if (activeList && activeList.length > 0) {
           const active = activeList[0];
@@ -658,13 +659,13 @@ export default function App() {
       .channel(`tow-${activeTowJob.id}`)
       .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'emergencias_activas', filter: `id=eq.${activeTowJob.id}` }, async (payload) => {
         const updated = payload.new;
-        if (updated.estado === 'dispatched') {
+        if (updated.estado === 'dispatched' || updated.estado === 'activa') {
           setTowState('dispatched');
-          if (updated.asignado_id) {
+          if (updated.abogado_id) {
             const { data: userData } = await supabase
               .from('usuarios')
               .select('nombre_completo, contacto_emergencia_1_telefono')
-              .eq('id', updated.asignado_id)
+              .eq('id', updated.abogado_id)
               .maybeSingle();
 
             setActiveTowJob(prev => prev ? {
@@ -673,7 +674,7 @@ export default function App() {
               driverPhone: userData?.contacto_emergencia_1_telefono || ''
             } : null);
           }
-        } else if (updated.estado === 'completed') {
+        } else if (updated.estado === 'completed' || updated.estado === 'resuelta') {
           // Resolved successfully
           setTowState('idle');
           setActiveTowJob(null);
@@ -727,12 +728,12 @@ export default function App() {
       .channel(`citizen-medic-${activeMedicEmergency.id}`)
       .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'emergencias_activas', filter: `id=eq.${activeMedicEmergency.id}` }, (payload) => {
         const updated = payload.new;
-        if (updated.estado === 'active') {
+        if (updated.estado === 'active' || updated.estado === 'activa') {
           setMedicState('active');
           setIsMedicWindowOpen(true);
           setIsMedicDailyCoActive(true);
           triggerPush('🏥 Doctor Conectado', 'El médico de guardia ha aceptado tu caso y ya está conectado.');
-        } else if (updated.estado === 'completed') {
+        } else if (updated.estado === 'completed' || updated.estado === 'resuelta') {
           setMedicState('idle');
           setActiveMedicEmergency(null);
           setIsMedicWindowOpen(false);
@@ -757,11 +758,11 @@ export default function App() {
       .channel(`citizen-ambulance-${activeAmbulanceJob.id}`)
       .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'emergencias_activas', filter: `id=eq.${activeAmbulanceJob.id}` }, (payload) => {
         const updated = payload.new;
-        if (updated.estado === 'dispatched') {
+        if (updated.estado === 'dispatched' || updated.estado === 'activa') {
           setAmbulanceState('dispatched');
           setIsAmbulanceWindowOpen(true);
           triggerPush('🚑 Auxilio en Camino', 'La unidad de paramédicos de resguardo ha iniciado ruta oficial hacia tu ubicación.');
-        } else if (updated.estado === 'completed') {
+        } else if (updated.estado === 'completed' || updated.estado === 'resuelta') {
           setAmbulanceState('idle');
           setActiveAmbulanceJob(null);
           setIsAmbulanceWindowOpen(false);
@@ -787,10 +788,11 @@ export default function App() {
       const { data: callingData } = await supabase
         .from('emergencias_activas')
         .select('*')
-        .eq('estado', 'pending');
+        .eq('estado', 'buscando');
 
-      if (callingData && callingData.length > 0) {
-        const active = callingData[0];
+      const filteredTow = callingData?.filter(e => !e.sala_webrtc_url) || [];
+      if (filteredTow.length > 0) {
+        const active = filteredTow[0];
         const { data: userData } = await supabase
           .from('usuarios')
           .select('nombre_completo, contacto_emergencia_1_telefono')
@@ -822,8 +824,8 @@ export default function App() {
         const { data: activeList } = await supabase
           .from('emergencias_activas')
           .select('*')
-          .eq('estado', 'dispatched')
-          .eq('asignado_id', sessionUser.id);
+          .eq('estado', 'activa')
+          .eq('abogado_id', sessionUser.id);
 
         if (activeList && activeList.length > 0) {
           const active = activeList[0];
@@ -880,10 +882,11 @@ export default function App() {
       const { data: callingData } = await supabase
         .from('emergencias_activas')
         .select('*')
-        .eq('estado', 'calling_ambulance');
+        .eq('estado', 'buscando');
 
-      if (callingData && callingData.length > 0) {
-        const active = callingData[0];
+      const filteredAmbulance = callingData?.filter(e => e.sala_webrtc_url && e.sala_webrtc_url.includes('Ambulance')) || [];
+      if (filteredAmbulance.length > 0) {
+        const active = filteredAmbulance[0];
         const { data: userData } = await supabase
           .from('usuarios')
           .select('nombre_completo, contacto_emergencia_1_telefono')
@@ -914,8 +917,8 @@ export default function App() {
         const { data: activeList } = await supabase
           .from('emergencias_activas')
           .select('*')
-          .eq('estado', 'dispatched')
-          .eq('asignado_id', sessionUser.id);
+          .eq('estado', 'activa')
+          .eq('abogado_id', sessionUser.id);
 
         if (activeList && activeList.length > 0) {
           const active = activeList[0];
@@ -971,10 +974,11 @@ export default function App() {
       const { data: callingData } = await supabase
         .from('emergencias_activas')
         .select('*')
-        .eq('estado', 'calling_medic');
+        .eq('estado', 'buscando');
 
-      if (callingData && callingData.length > 0) {
-        const active = callingData[0];
+      const filteredMedic = callingData?.filter(e => e.sala_webrtc_url && e.sala_webrtc_url.includes('Medic')) || [];
+      if (filteredMedic.length > 0) {
+        const active = filteredMedic[0];
         const { data: userData } = await supabase
           .from('usuarios')
           .select('nombre_completo, contacto_emergencia_1_telefono')
@@ -1003,8 +1007,8 @@ export default function App() {
         const { data: activeList } = await supabase
           .from('emergencias_activas')
           .select('*')
-          .eq('estado', 'active')
-          .eq('asignado_id', sessionUser.id);
+          .eq('estado', 'activa')
+          .eq('abogado_id', sessionUser.id);
 
         if (activeList && activeList.length > 0) {
           const active = activeList[0];
@@ -1690,7 +1694,7 @@ export default function App() {
           await supabase.from('emergencias_activas').insert({
             id: emerId,
             ciudadano_id: sessionUser?.id || null,
-            estado: 'calling_ambulance',
+            estado: 'buscando',
             ubicacion_texto: citizenProfile.city || 'Caracas',
             ubicacion_lat: citizenCoords.lat,
             ubicacion_lng: citizenCoords.lng,
@@ -1744,7 +1748,7 @@ export default function App() {
           await supabase.from('emergencias_activas').insert({
             id: emerId,
             ciudadano_id: sessionUser?.id || null,
-            estado: 'calling_medic',
+            estado: 'buscando',
             ubicacion_texto: citizenProfile.city || 'Caracas',
             ubicacion_lat: citizenCoords.lat,
             ubicacion_lng: citizenCoords.lng,
@@ -2219,7 +2223,7 @@ export default function App() {
           await supabase.from('emergencias_activas').insert({
             id: emerId,
             ciudadano_id: sessionUser?.id || null,
-            estado: 'pending',
+            estado: 'buscando',
             ubicacion_texto: citizenProfile.city || 'Caracas',
             ubicacion_lat: citizenCoords.lat,
             ubicacion_lng: citizenCoords.lng,
@@ -2244,7 +2248,7 @@ export default function App() {
         .from('emergencias_activas')
         .update({ 
           estado: 'activa', 
-          asignado_id: sessionUser?.id || null,
+          abogado_id: sessionUser?.id || null,
           tarifa_aplicada: proposedTariff 
         })
         .eq('id', activeEmergency.id);
@@ -2342,12 +2346,12 @@ export default function App() {
     if (!activeTowJob) return;
 
     try {
-      // Update Supabase to dispatched and set driver (asignado_id)
+      // Update Supabase to dispatched and set driver (abogado_id)
       const { error } = await supabase
         .from('emergencias_activas')
         .update({
-          estado: 'dispatched',
-          asignado_id: sessionUser?.id || null
+          estado: 'activa',
+          abogado_id: sessionUser?.id || null
         })
         .eq('id', activeTowJob.id);
 
@@ -2611,7 +2615,7 @@ export default function App() {
             // A. Update emergency state in DB
             await supabase
               .from('emergencias_activas')
-              .update({ estado: 'completed' })
+              .update({ estado: 'resuelta' })
               .eq('id', activeTowJob.id);
 
             // B. Debit total amount from saldos
@@ -2726,7 +2730,7 @@ export default function App() {
             // A. Update emergency state in DB
             await supabase
               .from('emergencias_activas')
-              .update({ estado: 'completed' })
+              .update({ estado: 'resuelta' })
               .eq('id', activeAmbulanceJob.id);
 
             // B. Debit total amount from saldos
@@ -5149,8 +5153,8 @@ export default function App() {
                                 await supabase
                                   .from('emergencias_activas')
                                   .update({ 
-                                    estado: 'dispatched',
-                                    asignado_id: sessionUser?.id || null
+                                    estado: 'activa',
+                                    abogado_id: sessionUser?.id || null
                                   })
                                   .eq('id', activeAmbulanceJob.id);
                               } catch (e) {
@@ -5374,8 +5378,8 @@ export default function App() {
                                 await supabase
                                   .from('emergencias_activas')
                                   .update({ 
-                                    estado: 'active',
-                                    asignado_id: sessionUser?.id || null
+                                    estado: 'activa',
+                                    abogado_id: sessionUser?.id || null
                                   })
                                   .eq('id', activeMedicEmergency.id);
                               } catch (e) {
@@ -5479,7 +5483,7 @@ export default function App() {
                               try {
                                 await supabase
                                   .from('emergencias_activas')
-                                  .update({ estado: 'completed' })
+                                  .update({ estado: 'resuelta' })
                                   .eq('id', activeMedicEmergency.id);
                               } catch (e) {
                                 console.error(e);

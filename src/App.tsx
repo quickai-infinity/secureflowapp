@@ -1532,31 +1532,41 @@ export default function App() {
     
     const emerId = generateUUIDv4();
     
-    // Solicitamos la creación real de la sala dinámica a Daily.co mediante el proxy seguro
+    // Solicitamos la creación real de la sala dinámica directamente en Daily.co desde el frontend
     let dailyUrlGenerated = `https://iframe.daily.co/secureflow-abogado-${emerId.toLowerCase()}`;
     try {
-      const roomResponse = await fetch('/api/rooms', {
+      const dailyResponse = await fetch('https://api.daily.co/v1/rooms', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' }
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': 'Bearer 2d632b78894ae034f72f94e9abd129bdc7a2707741b7c92a4bdc9bd16fe3642a'
+        },
+        body: JSON.stringify({
+          properties: {
+            enable_chat: true,
+            start_video_off: false,
+            start_audio_off: false,
+          }
+        })
       });
-      if (roomResponse.ok) {
-        const roomData = await roomResponse.json();
-        if (roomData.url) {
-          dailyUrlGenerated = roomData.url;
+
+      if (dailyResponse.ok) {
+        const dailyData = await dailyResponse.json();
+        if (dailyData.url) {
+          dailyUrlGenerated = dailyData.url;
           console.log('[SOS WebRTC] Sala oficial de Daily.co creada con éxito:', dailyUrlGenerated);
         } else {
-          throw new Error('La API de Daily.co no retornó una URL válida de reunión.');
+          throw new Error('La API de Daily.co no devolvió la URL de la reunión.');
         }
       } else {
-        const errJson = await roomResponse.json().catch(() => ({}));
-        const errMsg = errJson.details || errJson.error || 'Falta configuración en backend.';
-        throw new Error(errMsg);
+        const errText = await dailyResponse.text();
+        throw new Error(`Código ${dailyResponse.status}: ${errText}`);
       }
     } catch (e: any) {
-      console.warn('[SOS WebRTC ERROR] Error al conectar con /api/rooms. Mostrando alerta al operador:', e);
+      console.error('[SOS WebRTC ERROR] Error al conectar de forma directa con Daily.co:', e);
       showMaterialAlert(
         '⚠️ Configuración WebRTC Requerida',
-        `No se pudo crear una sala dinámica real en los servidores de Daily.co. Verifica que la variable DAILY_API_KEY esté correctamente guardada en el backend.\n\nDetalle: ${e.message}`
+        `No se pudo crear una sala dinámica real directamente en Daily.co.\n\nDetalle: ${e.message}`
       );
     }
 

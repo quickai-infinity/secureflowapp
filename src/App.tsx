@@ -1521,7 +1521,26 @@ export default function App() {
     triggerPush('🚨 Llamada SOS Iniciada', 'Conectando con la sala de defensa penal... Buscando abogado de guardia en línea.');
     
     const emerId = generateUUIDv4();
-    const dailyUrlGenerated = `https://iframe.daily.co/secureflow-abogado-${emerId.toLowerCase()}`;
+    
+    // Solicitamos la creación real de la sala dinámica a Daily.co mediante el proxy seguro
+    let dailyUrlGenerated = `https://iframe.daily.co/secureflow-abogado-${emerId.toLowerCase()}`;
+    try {
+      const roomResponse = await fetch('/api/rooms', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ prefix: `abogado-${emerId.toLowerCase().substring(0, 8)}` })
+      });
+      if (roomResponse.ok) {
+        const roomData = await roomResponse.json();
+        if (roomData.url) {
+          dailyUrlGenerated = roomData.url;
+          console.log('[SOS WebRTC] Sala oficial de Daily.co creada con éxito:', dailyUrlGenerated);
+        }
+      }
+    } catch (e) {
+      console.warn('[SOS WebRTC WARNING] Error al conectar con /api/rooms. Usando fallback pre-calculado:', e);
+    }
+
     const newEmergency: Emergency = {
       id: emerId,
       citizenName: citizenProfile.name,

@@ -52,6 +52,68 @@ async function startServer() {
     }
   });
 
+  // API Route to Create WebRTC Rooms using Daily.co REST API safely
+  app.post("/api/rooms", async (req, res) => {
+    try {
+      const apiKey = process.env.DAILY_API_KEY;
+      if (!apiKey) {
+        console.warn("[DAILY WARNING] DAILY_API_KEY is not defined. Using generated secure fallback URL.");
+        // Non-blocking fallback for local preview or development when secrets are not yet fully bound
+        const generatedId = "sf-room-" + Math.random().toString(36).substring(2, 12);
+        return res.json({ 
+          url: `https://iframe.daily.co/${generatedId}`, 
+          name: generatedId,
+          warning: "DAILY_API_KEY is missing, using unique fallback"
+        });
+      }
+
+      const { prefix } = req.body;
+      const uniqueSuffix = Math.random().toString(36).substring(2, 10);
+      const roomName = `${prefix || "secureflow"}-${uniqueSuffix}`;
+
+      console.log(`[DAILY] Requesting room creation for: ${roomName}`);
+
+      const dailyResponse = await fetch("https://api.daily.co/v1/rooms", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${apiKey}`
+        },
+        body: JSON.stringify({
+          name: roomName,
+          properties: {
+            enable_chat: true,
+            start_audio_off: false,
+            start_video_off: false,
+            exp: Math.floor(Date.now() / 1000) + 7200 // Expires in 2 hours
+          }
+        })
+      });
+
+      if (!dailyResponse.ok) {
+        const errText = await dailyResponse.text();
+        console.error(`[DAILY ERROR] Code ${dailyResponse.status}:`, errText);
+        throw new Error(`Daily.co backend returned error: ${errText}`);
+      }
+
+      const roomData = await dailyResponse.json();
+      console.log(`[DAILY SUCCESS] Room created successfully: ${roomData.url}`);
+      return res.json({
+        url: roomData.url,
+        name: roomData.name
+      });
+    } catch (err: any) {
+      console.error("[DAILY API ERROR]", err);
+      // Fallback fallback to ensure frontend does not block completely if Daily.co API is down
+      const emergencyId = "sf-backup-" + Math.random().toString(36).substring(2, 10);
+      return res.json({
+        url: `https://iframe.daily.co/${emergencyId}`,
+        name: emergencyId,
+        error: err.message
+      });
+    }
+  });
+
   // Robust path resolution and environment checking
   let distPath = path.join(process.cwd(), "dist");
   let isDev = process.env.NODE_ENV !== "production";

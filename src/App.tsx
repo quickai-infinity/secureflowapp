@@ -1968,23 +1968,30 @@ export default function App() {
                        selectRole === 'medic' ? 'medico' : selectRole;
 
         const finalName = citizenProfile.name || 'Usuario SecureFlow';
+        const finalPhone = citizenProfile.phone || '584241234567';
+
+        const signupMetadata = {
+          nombre_completo: finalName,
+          telefono: finalPhone,
+          role: dbRole,
+          tipo_vehiculo: citizenVehicleType || 'coche',
+          inpreabogado: impreAbogadoField || '',
+          ciudad: citizenProfile.city || 'Caracas',
+          especialidad: selectRole === 'lawyer' ? 'Defensa Penal' : (selectRole === 'medic' ? 'Triaje de Guardia' : ''),
+          // Keep supplementary fields compatible
+          impre_abogado: impreAbogadoField || null,
+          ciudadano_id: ciudadanoIdField || null,
+          grua_id: gruaIdField || null,
+          credential_ambulance: credentialAmbulanceField || null,
+          credential_medic: credentialMedicField || null,
+          selfie_url: selfieCaptured
+        };
 
         const { data: authData, error: authErr } = await supabase.auth.signUp({
           email: authEmail.trim(),
           password: authPassword.trim(),
           options: {
-            data: {
-              role: dbRole,
-              rol: dbRole,
-              full_name: finalName,
-              nombre_completo: finalName,
-              impre_abogado: impreAbogadoField || null,
-              ciudadano_id: ciudadanoIdField || null,
-              grua_id: gruaIdField || null,
-              credential_ambulance: credentialAmbulanceField || null,
-              credential_medic: credentialMedicField || null,
-              selfie_url: selfieCaptured
-            }
+            data: signupMetadata
           }
         });
         

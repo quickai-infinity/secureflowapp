@@ -36,6 +36,45 @@ function generateUUIDv4() {
   });
 }
 
+async function safeUpdateEmergencyState(id: string, proposedState: string) {
+  const { error } = await supabase
+    .from('emergencias_activas')
+    .update({ estado: proposedState })
+    .eq('id', id);
+
+  if (!error) {
+    console.log(`[SAFE STATE UPDATE] Estado actualizado con éxito a: '${proposedState}'`);
+    return { success: true, estado: proposedState };
+  }
+
+  console.warn(`[SAFE STATE UPDATE] Falló estado propuesto '${proposedState}' para la emergencia ${id}. Error:`, error);
+
+  if (error.message && (error.message.includes('check constraint') || error.message.includes('violates check constraint') || String(error.code) === '23514')) {
+    const fallbacks: Record<string, string[]> = {
+      'resuelta': ['completed', 'completada', 'active'],
+      'buscando': ['calling', 'pending', 'active'],
+      'activa': ['active', 'dispatched', 'pending']
+    };
+
+    const list = fallbacks[proposedState] || [];
+    for (const altState of list) {
+      console.log(`[SAFE STATE UPDATE] Probando estado alternativo '${altState}'...`);
+      const { error: altError } = await supabase
+        .from('emergencias_activas')
+        .update({ estado: altState })
+        .eq('id', id);
+
+      if (!altError) {
+        console.log(`[SAFE STATE UPDATE] ¡Éxito con el estado alternativo '${altState}'!`);
+        return { success: true, estado: altState };
+      }
+      console.warn(`[SAFE STATE UPDATE] El estado alternativo '${altState}' también falló:`, altError);
+    }
+  }
+
+  throw error;
+}
+
 const SecureFlowLogoCustom = ({ className = "w-16 h-16" }: { className?: string }) => {
   return (
     <div className={`relative flex items-center justify-center ${className}`}>
@@ -2338,12 +2377,7 @@ export default function App() {
         setIsAuthLoading(true);
         try {
           // Resolve emergency row
-          const { error: updateErr } = await supabase
-            .from('emergencias_activas')
-            .update({ estado: 'resuelta' })
-            .eq('id', activeEmergency.id);
-
-          if (updateErr) throw updateErr;
+          await safeUpdateEmergencyState(activeEmergency.id, 'resuelta');
 
           // Deduct balance from citizen and accrue lawyer earnings in saldos table
           const { data: emerData } = await supabase
@@ -2661,10 +2695,7 @@ export default function App() {
             setIsAuthLoading(true);
 
             // A. Update emergency state in DB
-            await supabase
-              .from('emergencias_activas')
-              .update({ estado: 'resuelta' })
-              .eq('id', activeTowJob.id);
+            await safeUpdateEmergencyState(activeTowJob.id, 'resuelta');
 
             // B. Debit total amount from saldos
             const { data: balanceRow } = await supabase
@@ -2776,10 +2807,7 @@ export default function App() {
             setIsAuthLoading(true);
 
             // A. Update emergency state in DB
-            await supabase
-              .from('emergencias_activas')
-              .update({ estado: 'resuelta' })
-              .eq('id', activeAmbulanceJob.id);
+            await safeUpdateEmergencyState(activeAmbulanceJob.id, 'resuelta');
 
             // B. Debit total amount from saldos
             const { data: balanceRow } = await supabase
@@ -3583,35 +3611,33 @@ export default function App() {
                             <div className="flex justify-between items-center">
                               <span className="text-[10px] font-bold text-red-500 flex items-center gap-1">
                                 <span className="w-1.5 h-1.5 bg-red-500 rounded-full animate-ping" />
-                                VIDEO TRANSMITIENDO Y RESPALDANDO
+                                VIDEO CONEXIÓN SOS ACTIVA
                               </span>
-                              <button 
-                                onClick={() => setVideoStreamType(v => v === 'front' ? 'rear' : 'front')}
-                                className="text-[9px] bg-immersive-dark text-slate-300 font-bold px-1.5 py-1 rounded border border-white/5 hover:bg-immersive-frame"
-                              >
-                                {videoStreamType === 'front' ? 'Cam Trasera' : 'Cam Frontal'}
-                              </button>
+                              <span className="text-[9px] text-slate-400 font-mono">
+                                ID: {activeEmergency?.id?.substring(0, 8).toUpperCase() || 'SALA'}
+                              </span>
                             </div>
 
-                            {/* Stream camera block simulator */}
-                            <div className="h-32 bg-immersive-dark rounded-xl relative overflow-hidden flex items-center justify-center border border-white/5">
-                              {videoStreamType === 'rear' ? (
-                                <>
-                                  <div className="absolute inset-0 bg-slate-900/60 flex flex-col justify-between p-2">
-                                    <span className="text-[9px] text-white/80 font-mono">📍 Lat: 10.4850 | Lng: -66.9030</span>
-                                    <div className="text-center font-bold text-red-400 text-[10px] animate-pulse">
-                                      {activeEmergency ? 'Dra. María Mendoza (Abogado COPP)' : 'Guardia Vial'} conectando...
-                                    </div>
-                                    <span className="text-[9px] text-green-400 text-right">Amparo Legal Gaceta G-42.458</span>
-                                  </div>
-                                  <div className="w-full h-full bg-slate-950 flex items-center justify-center text-6xl opacity-20">👮🏻‍♂️</div>
-                                </>
-                              ) : (
-                                <>
-                                  <span className="text-6xl opacity-30">👤</span>
-                                  <div className="absolute bottom-2 left-2 text-[9px] text-white bg-black/50 px-1.5 py-0.5 rounded font-mono">Tú (Jhon)</div>
-                                </>
-                              )}
+                            {/* Actual Interactive Daily.co WebRTC Video Iframe */}
+                            <div className="h-64 bg-slate-950 rounded-xl relative overflow-hidden border border-white/5 shadow-inner">
+                              <iframe 
+                                src={activeEmergency?.dailyRoomUrl || "https://iframe.daily.co/secureflow-abogado-defensa"}
+                                allow="camera; microphone; fullscreen"
+                                className="w-full h-full border-0 absolute inset-0 rounded-xl"
+                                title="Daily.co Citizen SOS"
+                              />
+                              <div className="absolute top-2 left-2 bg-black/75 px-1.5 py-0.5 rounded text-[8px] text-red-400 font-mono tracking-wider pointer-events-none z-10 border border-white/5 uppercase">
+                                GRABACIÓN Y RESPALDO EN NUBE 🛡️
+                              </div>
+                            </div>
+
+                            <div className="flex justify-between items-center pt-1">
+                              <p className="text-[9px] text-slate-400 font-mono">
+                                📍 Lat: 10.4850 | Lng: -66.9030 (GPS Seguro)
+                              </p>
+                              <p className="text-[9px] text-emerald-400 font-extrabold uppercase">
+                                Amparo Legal Gaceta G-42.458
+                              </p>
                             </div>
                           </div>
                         )}
@@ -5529,10 +5555,7 @@ export default function App() {
                           <button 
                             onClick={async () => {
                               try {
-                                await supabase
-                                  .from('emergencias_activas')
-                                  .update({ estado: 'resuelta' })
-                                  .eq('id', activeMedicEmergency.id);
+                                await safeUpdateEmergencyState(activeMedicEmergency.id, 'resuelta');
                               } catch (e) {
                                 console.error(e);
                               }

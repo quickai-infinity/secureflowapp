@@ -2761,7 +2761,7 @@ export default function App() {
     <div className="min-h-screen bg-[#0d0f14] text-slate-100 flex flex-col md:flex-row items-center justify-center font-sans select-none overflow-x-hidden md:p-4">
       
       {/* GLOBAL FIXED SUPERIOR LOGOUT BUTTON (ANTI-BLACKOUT RED DE SEGURIDAD) */}
-      {sessionUser && (
+      {sessionUser && activeDevice !== 'landing' && (
         <button
           onClick={handleSignOut}
           className="fixed top-4 right-4 z-[99999] bg-rose-600 hover:bg-rose-700 active:scale-95 text-white text-xs font-black tracking-widest px-4 py-3 rounded-2xl shadow-[0_0_30px_rgba(225,29,72,0.4)] border border-rose-500/30 transition-all flex items-center gap-2 cursor-pointer uppercase select-none"

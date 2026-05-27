@@ -426,6 +426,39 @@ export default function App() {
     }
   }, [activeDevice, sessionUser]);
 
+  // Sincronización en tiempo real de saldos reales de base de datos
+  useEffect(() => {
+    if (!sessionUser) return;
+    
+    const fetchBalancesReales = async () => {
+      try {
+        if (activeDevice === 'citizen') {
+          const { data: saldoData } = await supabase
+            .from('saldos')
+            .select('creditos_disponibles')
+            .eq('usuario_id', sessionUser.id)
+            .maybeSingle();
+          if (saldoData) {
+            setCitizenBalance(Number(saldoData.creditos_disponibles));
+          }
+        } else if (activeDevice === 'lawyer') {
+          const { data: sla } = await supabase
+            .from('saldos_abogados')
+            .select('saldo_acumulado')
+            .eq('abogado_id', sessionUser.id)
+            .maybeSingle();
+          if (sla) {
+            setTotalLawyerEarnings(Number(sla.saldo_acumulado) || 0.00);
+          }
+        }
+      } catch (err) {
+        console.error("Error al sincronizar saldos reales:", err);
+      }
+    };
+
+    fetchBalancesReales();
+  }, [sessionUser, activeDevice]);
+
   const loadProfileFromDb = async (userId: string, email: string) => {
     try {
       // Precise Role Reading: Fetching user data matching either auth_id or id safely
@@ -483,6 +516,17 @@ export default function App() {
             licenseNumber: 'INPRE-98.421',
             specialty: 'Derecho Constitucional & Penal'
           });
+          // Cargar saldo real del abogado
+          const { data: sla } = await supabase
+            .from('saldos_abogados')
+            .select('saldo_acumulado')
+            .eq('abogado_id', userId)
+            .maybeSingle();
+          if (sla) {
+            setTotalLawyerEarnings(Number(sla.saldo_acumulado) || 0.00);
+          } else {
+            setTotalLawyerEarnings(0.00);
+          }
         } else if (finalRole === 'driver') {
           setDriverProfile({
             name: userData.nombre_completo,
@@ -1317,8 +1361,10 @@ export default function App() {
     const newMsg = { sender: 'user' as const, text, time: currentMsgTime };
     setAgentInput('');
 
+    // Pre-update local chat state immediately to show the user's message
+    setAgentMessages(prev => [...prev, newMsg]);
+
     if (activeEmergency) {
-      setAgentMessages(prev => [...prev, newMsg]);
       try {
         await supabase.channel(`room-lawyer-${activeEmergency.id}`).send({
           type: 'broadcast',
@@ -1348,9 +1394,13 @@ export default function App() {
     }
 
     try {
-      const res = await fetch('https://panel1.quickai.agency/webhook/abogadosya-agente', {
+      const targetUrl = 'https://panel1.quickai.agency/webhook/abogadoya-agente';
+      const res = await fetch(targetUrl, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          'Accept': 'application/json'
+        },
         body: JSON.stringify({
           text: text,
           message: text,
@@ -1415,9 +1465,13 @@ export default function App() {
     setIsIAPending(true);
 
     try {
-      const res = await fetch('https://panel1.quickai.agency/webhook/abogadosya-agente', {
+      const targetUrl = 'https://panel1.quickai.agency/webhook/abogadoya-agente';
+      const res = await fetch(targetUrl, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          'Accept': 'application/json'
+        },
         body: JSON.stringify({
           text: text,
           message: text,
@@ -1463,9 +1517,13 @@ export default function App() {
     setIsDriverSupportPending(true);
 
     try {
-      const res = await fetch('https://panel1.quickai.agency/webhook/abogadosya-agente', {
+      const targetUrl = 'https://panel1.quickai.agency/webhook/abogadoya-agente';
+      const res = await fetch(targetUrl, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          'Accept': 'application/json'
+        },
         body: JSON.stringify({
           text: text,
           message: text,
@@ -1577,9 +1635,13 @@ export default function App() {
 
     // Real asynchronous HTTP fetch request to central emergency dispatcher
     try {
-      const webhookRes = await fetch('https://panel1.quickai.agency/webhook/abogadoya/emergencia', {
+      const targetUrl = 'https://panel1.quickai.agency/webhook/abogadoya/emergencia';
+      const webhookRes = await fetch(targetUrl, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          'Accept': 'application/json'
+        },
         body: JSON.stringify({
           id: emerId,
           name: citizenProfile.name,
@@ -1797,9 +1859,13 @@ export default function App() {
           });
           
           // Also trigger webhook for doctor emergency just in case! 
-          await fetch('https://panel1.quickai.agency/webhook/abogadoya/emergencia', {
+          const targetUrl = 'https://panel1.quickai.agency/webhook/abogadoya/emergencia';
+          await fetch(targetUrl, {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers: {
+              'Content-Type': 'application/json',
+              'Accept': 'application/json'
+            },
             body: JSON.stringify({
               id: emerId,
               name: citizenProfile.name,
@@ -1835,9 +1901,13 @@ export default function App() {
     setIsAmbulanceSupportPending(true);
 
     try {
-      const res = await fetch('https://panel1.quickai.agency/webhook/abogadosya-agente', {
+      const targetUrl = 'https://panel1.quickai.agency/webhook/abogadoya-agente';
+      const res = await fetch(targetUrl, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          'Accept': 'application/json'
+        },
         body: JSON.stringify({
           text: text,
           message: text,
@@ -1881,9 +1951,13 @@ export default function App() {
     setIsMedicSupportPending(true);
 
     try {
-      const res = await fetch('https://panel1.quickai.agency/webhook/abogadosya-agente', {
+      const targetUrl = 'https://panel1.quickai.agency/webhook/abogadoya-agente';
+      const res = await fetch(targetUrl, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          'Accept': 'application/json'
+        },
         body: JSON.stringify({
           text: text,
           message: text,
@@ -2345,11 +2419,47 @@ export default function App() {
             .single();
 
           if (emerData && emerData.ciudadano_id) {
+            const ganancia = Number((rate * 10 / 15).toFixed(2));
+            const comision = Number((rate * 5 / 15).toFixed(2));
+
+            // A. Inserta un registro en historial_comisiones
+            await supabase.from('historial_comisiones').insert({
+              emergencia_id: activeEmergency.id,
+              ciudadano_id: emerData.ciudadano_id,
+              profesional_id: sessionUser?.id || '',
+              servicio: 'Defensa Legal',
+              monto_cobrado: rate,
+              ganancia_profesional: ganancia,
+              comision_secureflow: comision
+            });
+
+            // B. Actualiza el saldo del abogado en saldos_abogados
+            if (sessionUser?.id) {
+              const { data: curLawyerSaldo } = await supabase
+                .from('saldos_abogados')
+                .select('saldo_acumulado')
+                .eq('abogado_id', sessionUser.id)
+                .maybeSingle();
+
+              const prevSaldoLawyer = curLawyerSaldo ? Number(curLawyerSaldo.saldo_acumulado) : 0;
+              const newSaldoLawyer = prevSaldoLawyer + ganancia;
+
+              await supabase
+                .from('saldos_abogados')
+                .upsert({
+                  abogado_id: sessionUser.id,
+                  saldo_acumulado: newSaldoLawyer
+                });
+              
+              setTotalLawyerEarnings(newSaldoLawyer);
+            }
+
+            // C. Actualiza el saldo del ciudadano en la tabla saldos
             const { data: curSaldo } = await supabase
               .from('saldos')
               .select('creditos_disponibles')
               .eq('usuario_id', emerData.ciudadano_id)
-              .single();
+              .maybeSingle();
 
             if (curSaldo) {
               const newBal = Math.max(0, Number(curSaldo.creditos_disponibles) - rate);
@@ -2357,10 +2467,10 @@ export default function App() {
                 .from('saldos')
                 .update({ creditos_disponibles: newBal })
                 .eq('usuario_id', emerData.ciudadano_id);
+              
+              setCitizenBalance(newBal);
             }
           }
-
-          setTotalLawyerEarnings(e => e + rate * 0.90); // 90% goes to the lawyer
           setCompletedLawyerSessions(c => c + 1);
           
           setIsLiveVideoActive(false);
@@ -2570,9 +2680,13 @@ export default function App() {
     setAmbulanceAgentMessages(newMsgs);
     setAmbulanceAgentInput('');
     try {
-      const res = await fetch('https://panel1.quickai.agency/webhook/abogadosya-agente', {
+      const targetUrl = 'https://panel1.quickai.agency/webhook/abogadoya-agente';
+      const res = await fetch(targetUrl, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          'Accept': 'application/json'
+        },
         body: JSON.stringify({ text })
       });
       const data = await res.json();
@@ -2591,9 +2705,13 @@ export default function App() {
     setMedicAgentMessages(newMsgs);
     setMedicAgentInput('');
     try {
-      const res = await fetch('https://panel1.quickai.agency/webhook/abogadosya-agente', {
+      const targetUrl = 'https://panel1.quickai.agency/webhook/abogadoya-agente';
+      const res = await fetch(targetUrl, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          'Accept': 'application/json'
+        },
         body: JSON.stringify({ text })
       });
       const data = await res.json();
@@ -4492,7 +4610,7 @@ export default function App() {
                         
                         {/* Dynamic Emergency Alarm Card */}
                         {activeEmergency && activeEmergency.status === 'calling' ? (
-                          <div className="bg-gradient-to-br from-red-650 to-red-600 border border-red-500 rounded-3xl p-4 space-y-3 text-white shadow-xl animate-bounce">
+                          <div className="bg-gradient-to-br from-red-650 to-red-600 border border-red-500 rounded-3xl p-4 space-y-3 text-white shadow-xl">
                             <div className="flex justify-between items-center">
                               <span className="text-[9px] bg-black/30 font-bold uppercase tracking-wider px-2 py-0.5 rounded-md">
                                 🚨 AUXILIO EN CURSO
@@ -4521,7 +4639,7 @@ export default function App() {
 
                             <button 
                               onClick={handleLawyerAcceptEmer}
-                              className="w-full bg-white text-red-650 hover:bg-red-50 py-2.5 rounded-2xl text-xs font-black uppercase text-center transition-all shadow-md active:scale-95"
+                              className="w-full bg-white text-black hover:bg-red-50 py-2.5 rounded-2xl text-xs font-black uppercase text-center transition-all shadow-md"
                             >
                               📹 ACEPTAR Y CONECTAR
                             </button>
@@ -4543,52 +4661,6 @@ export default function App() {
                               />
                               <div className="absolute top-2 left-2 bg-black/75 px-2 py-0.5 rounded text-[8px] text-red-400 font-mono tracking-wider pointer-events-none z-10 border border-white/5 uppercase">
                                 SALA ACTIVADA: {activeEmergency?.id ? activeEmergency.id.substring(0, 8).toUpperCase() : 'secureflow-abogado-defensa'}
-                              </div>
-                            </div>
-
-                            {/* Live Chat & Legal Amparo log */}
-                            <div className="bg-slate-950 rounded-2xl border border-white/5 flex flex-col justify-stretch overflow-hidden">
-                              <div className="bg-slate-900 border-b border-white/5 py-1.5 px-3 flex justify-between items-center text-[9px] font-bold text-slate-400">
-                                <span className="uppercase text-indigo-400">💬 CANAL EN DIRECTO CON CIUDADANO</span>
-                                <span className="font-mono text-[8px]">ID: {activeEmergency?.id ? activeEmergency.id.substring(0, 8).toUpperCase() : ''}</span>
-                              </div>
-
-                              <div className="h-44 overflow-y-auto p-3.5 space-y-2.5">
-                                {agentMessages.length === 0 ? (
-                                  <div className="text-center text-[10px] text-slate-500 py-6 italic">No hay mensajes en esta sesión aún...</div>
-                                ) : (
-                                  agentMessages.map((msg, idx) => (
-                                    <div key={idx} className={`flex flex-col ${msg.sender === 'bot' ? 'items-end' : 'items-start'}`}>
-                                      <span className="text-[8px] text-slate-500 font-mono mb-0.5">
-                                        {msg.sender === 'bot' ? 'Dra. María Mendoza (Tú)' : 'Ciudadano'} • {msg.time}
-                                      </span>
-                                      <div className={`p-2.5 rounded-2xl text-[11px] max-w-[85%] leading-relaxed ${
-                                        msg.sender === 'bot' 
-                                          ? 'bg-amber-500 text-slate-950 font-medium rounded-tr-none' 
-                                          : 'bg-slate-800 text-slate-100 rounded-tl-none border border-white/5'
-                                      }`}>
-                                        {msg.text.replace(/⚙️ Dra. María Mendoza: /, '').replace(/⚖️ Dra. María Mendoza: /, '')}
-                                      </div>
-                                    </div>
-                                  ))
-                                )}
-                              </div>
-
-                              <div className="p-2 border-t border-white/5 bg-slate-900 flex items-center gap-2">
-                                <input 
-                                  type="text"
-                                  value={lawyerChatInput}
-                                  onChange={e => setLawyerChatInput(e.target.value)}
-                                  onKeyDown={e => { if (e.key === 'Enter') handleSendLawyerMessage(); }}
-                                  placeholder="Escribe un consejo legal al ciudadano..."
-                                  className="flex-1 bg-slate-950 border border-white/5 rounded-xl px-3 py-1.5 text-xs text-white focus:outline-none focus:border-amber-500"
-                                />
-                                <button 
-                                  onClick={handleSendLawyerMessage}
-                                  className="px-3.5 py-1.5 bg-amber-500 hover:bg-amber-400 text-slate-950 font-black text-xs rounded-xl"
-                                >
-                                  Enviar
-                                </button>
                               </div>
                             </div>
 
@@ -4651,7 +4723,7 @@ export default function App() {
                           {lawyerAgentMessages.map((msg, idx) => (
                             <div key={idx} className={`flex flex-col ${msg.sender === 'user' ? 'items-end' : 'items-start'}`}>
                               <span className="text-[9px] text-slate-500 mb-0.5 font-mono uppercase">
-                                {msg.sender === 'bot' ? '⚖️ Soporte Colegiado' : 'Tú'} • {msg.time}
+                                {msg.sender === 'bot' ? 'Agente' : 'Tú'} • {msg.time}
                               </span>
                               <div className={`p-3 rounded-2xl text-xs max-w-[85%] leading-relaxed ${msg.sender === 'user' ? 'bg-amber-500 text-slate-950 font-bold rounded-tr-none' : 'bg-slate-900 border border-slate-800 text-slate-200 rounded-tl-none'}`}>
                                 <p className="whitespace-pre-line">{msg.text}</p>

@@ -16,7 +16,7 @@ async function startServer() {
   // API CORS-free Webhook Proxy
   app.post("/api/webhook-proxy", async (req, res) => {
     try {
-      const targetUrl = (req.query.url as string) || "https://panel1.quickai.agency/webhook/abogadoya-agente";
+      const targetUrl = (req.query.url as string) || "https://panel1.quickai.agency/webhook/abogadosya-agente";
       
       console.log(`[PROXY] Forwarding request to: ${targetUrl}`);
       console.log(`[PROXY] Body:`, JSON.stringify(req.body));
@@ -50,6 +50,52 @@ async function startServer() {
       console.error("[PROXY ERROR] Failed to contact n8n webhook:", err);
       res.status(500).json({ 
         error: "Failed to communicate with the central artificial intelligence module", 
+        details: err.message 
+      });
+    }
+  });
+
+  // API CORS-free Proxy for n8n to avoid browser-level CORS issues
+  app.all("/api-n8n/*", async (req, res) => {
+    try {
+      const subPath = req.path.replace(/^\/api-n8n/, "");
+      const targetUrl = `https://panel1.quickai.agency${subPath}`;
+      
+      console.log(`[PROXY-N8N] Forwarding ${req.method} request to: ${targetUrl}`);
+
+      const headers: Record<string, string> = {
+        "Content-Type": "application/json",
+        "Accept": "application/json"
+      };
+
+      const fetchOptions: RequestInit = {
+        method: req.method,
+        headers: headers
+      };
+
+      if (req.method !== "GET" && req.method !== "HEAD") {
+        fetchOptions.body = JSON.stringify(req.body);
+      }
+
+      const webhookRes = await fetch(targetUrl, fetchOptions);
+      const textData = await webhookRes.text();
+      console.log(`[PROXY-N8N] Target responded with status ${webhookRes.status}`);
+
+      res.status(webhookRes.status);
+      const contentType = webhookRes.headers.get("content-type") || "";
+      if (contentType.includes("application/json")) {
+        try {
+          res.json(JSON.parse(textData));
+        } catch {
+          res.send(textData);
+        }
+      } else {
+        res.send(textData);
+      }
+    } catch (err: any) {
+      console.error("[PROXY-N8N ERROR] Failed to connect to target:", err);
+      res.status(500).json({ 
+        error: "Failed to communicate with proxy backend module", 
         details: err.message 
       });
     }

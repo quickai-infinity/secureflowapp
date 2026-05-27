@@ -2411,66 +2411,92 @@ export default function App() {
 
           if (updateErr) throw updateErr;
 
-          // Deduct balance from citizen and accrue lawyer earnings in saldos table
+          // Obtenemos el registro de la emergencia para mapear los IDs reales de la base de datos
           const { data: emerData } = await supabase
             .from('emergencias_activas')
             .select('ciudadano_id')
             .eq('id', activeEmergency.id)
-            .single();
+            .maybeSingle();
 
-          if (emerData && emerData.ciudadano_id) {
-            const ganancia = Number((rate * 10 / 15).toFixed(2));
-            const comision = Number((rate * 5 / 15).toFixed(2));
+          const citizenAuthId = emerData?.ciudadano_id;
 
-            // A. Inserta un registro en historial_comisiones
-            await supabase.from('historial_comisiones').insert({
-              emergencia_id: activeEmergency.id,
-              ciudadano_id: emerData.ciudadano_id,
-              profesional_id: sessionUser?.id || '',
-              servicio: 'Defensa Legal',
-              monto_cobrado: rate,
-              ganancia_profesional: ganancia,
-              comision_secureflow: comision
-            });
+          // Buscamos el ID real de public.usuarios para el ciudadano
+          let citizenTableId = null;
+          if (citizenAuthId) {
+            const { data: citizenUserRow } = await supabase
+              .from('usuarios')
+              .select('id')
+              .eq('auth_id', citizenAuthId)
+              .maybeSingle();
+            citizenTableId = citizenUserRow?.id;
+          }
 
-            // B. Actualiza el saldo del abogado en saldos_abogados
-            if (sessionUser?.id) {
-              const { data: curLawyerSaldo } = await supabase
-                .from('saldos_abogados')
-                .select('saldo_acumulado')
-                .eq('abogado_id', sessionUser.id)
-                .maybeSingle();
-
-              const prevSaldoLawyer = curLawyerSaldo ? Number(curLawyerSaldo.saldo_acumulado) : 0;
-              const newSaldoLawyer = prevSaldoLawyer + ganancia;
-
-              await supabase
-                .from('saldos_abogados')
-                .upsert({
-                  abogado_id: sessionUser.id,
-                  saldo_acumulado: newSaldoLawyer
-                });
-              
-              setTotalLawyerEarnings(newSaldoLawyer);
+          // Buscamos el ID real de public.abogados para el abogado
+          let lawyerAbogadoId = sessionUser?.id || '';
+          if (sessionUser?.id) {
+            const { data: lawyerAbogadoRow } = await supabase
+              .from('abogados')
+              .select('id')
+              .eq('auth_id', sessionUser.id)
+              .maybeSingle();
+            if (lawyerAbogadoRow) {
+              lawyerAbogadoId = lawyerAbogadoRow.id;
             }
+          }
 
-            // C. Actualiza el saldo del ciudadano en la tabla saldos
+          // Buscamos el ID real del abogado en public.usuarios
+          let lawyerTableId = sessionUser?.id || '';
+          if (sessionUser?.id) {
+            const { data: lawyerUserRow } = await supabase
+              .from('usuarios')
+              .select('id')
+              .eq('auth_id', sessionUser.id)
+              .maybeSingle();
+            if (lawyerUserRow) {
+              lawyerTableId = lawyerUserRow.id;
+            }
+          }
+
+          const ganancia = Number((rate * 10 / 15).toFixed(2));
+          const comision = Number((rate * 5 / 15).toFixed(2));
+
+          // Invocación a la función remota RPC procesar_cobro_sesion
+          const { error: rpcError } = await supabase.rpc('procesar_cobro_sesion', {
+            p_emergencia_id: activeEmergency.id,
+            p_auth_usuario_id: citizenAuthId,
+            p_tabla_ciudadano_id: citizenTableId,
+            p_tabla_abogado_id: lawyerAbogadoId,
+            p_tabla_profesional_id: lawyerTableId,
+            p_monto_total: rate,
+            p_ganancia: ganancia,
+            p_comision: comision
+          });
+
+          if (rpcError) throw rpcError;
+
+          // Sincronización en tiempo real posterior en el frontend de saldos actualizados
+          if (sessionUser?.id) {
+            const { data: sla } = await supabase
+              .from('saldos_abogados')
+              .select('saldo_acumulado')
+              .eq('abogado_id', sessionUser.id)
+              .maybeSingle();
+            if (sla) {
+              setTotalLawyerEarnings(Number(sla.saldo_acumulado) || 0.00);
+            }
+          }
+
+          if (citizenAuthId) {
             const { data: curSaldo } = await supabase
               .from('saldos')
               .select('creditos_disponibles')
-              .eq('usuario_id', emerData.ciudadano_id)
+              .eq('usuario_id', citizenAuthId)
               .maybeSingle();
-
             if (curSaldo) {
-              const newBal = Math.max(0, Number(curSaldo.creditos_disponibles) - rate);
-              await supabase
-                .from('saldos')
-                .update({ creditos_disponibles: newBal })
-                .eq('usuario_id', emerData.ciudadano_id);
-              
-              setCitizenBalance(newBal);
+              setCitizenBalance(Number(curSaldo.creditos_disponibles));
             }
           }
+
           setCompletedLawyerSessions(c => c + 1);
           
           setIsLiveVideoActive(false);

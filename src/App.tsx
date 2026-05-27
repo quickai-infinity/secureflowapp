@@ -150,6 +150,139 @@ const getNormalizedRole = (role: string): 'citizen' | 'lawyer' | 'driver' | 'amb
   return 'citizen'; // default fallback for logged-in users
 };
 
+// Helpers para cálculo geográfico de grúas y asistencias viales
+const getCoordsFromText = (text: string) => {
+  let hash = 0;
+  for (let i = 0; i < text.length; i++) {
+    hash = text.charCodeAt(i) + ((hash << 5) - hash);
+  }
+  const offsetLat = ((Math.abs(hash) % 100) / 1000) * 0.04 - 0.02; 
+  const offsetLng = (((Math.abs(hash) >> 8) % 100) / 1000) * 0.04 - 0.02;
+  return {
+    lat: 10.4984 + offsetLat,
+    lng: -66.8824 + offsetLng
+  };
+};
+
+const calculateDistanceInKm = (lat1: number, lon1: number, lat2: number, lon2: number) => {
+  const R = 6371; // Earth's radius in km
+  const dLat = (lat2 - lat1) * Math.PI / 180;
+  const dLon = (lon2 - lon1) * Math.PI / 180;
+  const a = 
+    Math.sin(dLat/2) * Math.sin(dLat/2) +
+    Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) * 
+    Math.sin(dLon/2) * Math.sin(dLon/2);
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+  const d = R * c;
+  return Number(d.toFixed(2));
+};
+
+// Componente de Mapa de Asistencia Vial (Leaflet dinámico)
+function RoadsideMap({ driverLat, driverLng, citizenLat, citizenLng }: { driverLat: number, driverLng: number, citizenLat: number, citizenLng: number }) {
+  const mapRef = useRef<HTMLDivElement>(null);
+  const leafletMapInstanceRef = useRef<any>(null);
+
+  useEffect(() => {
+    let active = true;
+    
+    const initLeaflet = () => {
+      // @ts-ignore
+      if (!window.L) {
+        setTimeout(() => {
+          if (active) initLeaflet();
+        }, 300);
+        return;
+      }
+
+      // @ts-ignore
+      const L = window.L;
+      if (!mapRef.current) return;
+
+      if (leafletMapInstanceRef.current) {
+        leafletMapInstanceRef.current.remove();
+      }
+
+      try {
+        const map = L.map(mapRef.current).setView([citizenLat, citizenLng], 14);
+        leafletMapInstanceRef.current = map;
+
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+          attribution: '© OpenStreetMap contributors'
+        }).addTo(map);
+
+        // Marker Grúa (Driver)
+        const driverIcon = L.divIcon({
+          html: '<div style="font-size: 26px; filter: drop-shadow(0 2px 4px rgba(0,0,0,0.4));">🚜</div>',
+          className: 'custom-div-icon',
+          iconSize: [26, 26],
+          iconAnchor: [13, 13]
+        });
+        L.marker([driverLat, driverLng], { icon: driverIcon }).addTo(map)
+          .bindPopup('<b>Unidad de Grúa</b><br/>Ubicación en tiempo real')
+          .openPopup();
+
+        // Marker Asegurado (Citizen)
+        const citizenIcon = L.divIcon({
+          html: '<div style="font-size: 26px; filter: drop-shadow(0 2px 4px rgba(0,0,0,0.4));">👤</div>',
+          className: 'custom-div-icon',
+          iconSize: [26, 26],
+          iconAnchor: [13, 13]
+        });
+        L.marker([citizenLat, citizenLng], { icon: citizenIcon }).addTo(map)
+          .bindPopup('<b>Asegurado (Ubicación Origen)</b>');
+
+        // Polyline de ruta
+        const latlngs = [
+          [driverLat, driverLng],
+          [citizenLat, citizenLng]
+        ];
+        L.polyline(latlngs, { color: '#fbbf24', weight: 4, dashArray: '5, 10' }).addTo(map);
+        
+        const bounds = L.latLngBounds(latlngs);
+        map.fitBounds(bounds, { padding: [40, 40] });
+      } catch (err) {
+        console.error("Error cargando mapa Leaflet:", err);
+      }
+    };
+
+    // Lazy load styles and scripts
+    if (!document.getElementById('leaflet-css-vial')) {
+      const link = document.createElement('link');
+      link.id = 'leaflet-css-vial';
+      link.rel = 'stylesheet';
+      link.href = 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.css';
+      document.head.appendChild(link);
+    }
+
+    if (!document.getElementById('leaflet-js-vial')) {
+      const script = document.createElement('script');
+      script.id = 'leaflet-js-vial';
+      script.src = 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.js';
+      document.head.appendChild(script);
+    }
+
+    initLeaflet();
+
+    return () => {
+      active = false;
+      if (leafletMapInstanceRef.current) {
+        leafletMapInstanceRef.current.remove();
+        leafletMapInstanceRef.current = null;
+      }
+    };
+  }, [driverLat, driverLng, citizenLat, citizenLng]);
+
+  return (
+    <div className="w-full h-full relative rounded-2xl overflow-hidden border border-slate-800 bg-slate-950">
+      <div ref={mapRef} className="w-full h-full min-h-[250px] z-10" />
+      <div className="absolute top-2 right-2 bg-slate-900/95 border border-slate-800 px-3 py-1.5 rounded-lg text-[9px] text-yellow-500 font-mono tracking-wider z-20 shadow-lg flex items-center gap-1.5 uppercase">
+        <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
+        Satelital GPS Activo
+      </div>
+    </div>
+  );
+}
+
 export default function App() {
   // Navigation & Role states
   const [activeDevice, setActiveDevice] = useState<'citizen' | 'lawyer' | 'driver' | 'admin' | 'landing' | 'ambulance' | 'medic'>('landing');
@@ -262,6 +395,7 @@ export default function App() {
   const [totalLawyerEarnings, setTotalLawyerEarnings] = useState<number>(0);
   const [completedLawyerSessions, setCompletedLawyerSessions] = useState<number>(0);
   const [isLawyerOnline, setIsLawyerOnline] = useState<boolean>(true);
+  const [lawyerHistory, setLawyerHistory] = useState<any[]>([]);
 
   // Ambulance Dispatch Engine 
   const [ambulanceState, setAmbulanceState] = useState<'idle' | 'proposed' | 'dispatched' | 'completed'>('idle');
@@ -314,6 +448,13 @@ export default function App() {
   const [isMedicCallingActive, setIsMedicCallingActive] = useState<boolean>(false);
   
   const [isDictating, setIsDictating] = useState(false);
+
+  // Nueva lógica exclusiva de grúas/asistencias viales
+  const [towDestinationText, setTowDestinationText] = useState<string>('Plaza Venezuela, Caracas');
+  const [isTowDailyCoActive, setIsTowDailyCoActive] = useState<boolean>(false);
+  const [towDailyCoUrl, setTowDailyCoUrl] = useState<string>('');
+  const [activeVialAssist, setActiveVialAssist] = useState<any | null>(null);
+  const [craneUnitState, setCraneUnitState] = useState<{ lat_actual: number, lng_actual: number } | null>({ lat_actual: 10.4900, lng_actual: -66.9100 });
 
   // Tow Truck State Engine - Online and Ready by Default
   const [towState, setTowState] = useState<'idle' | 'calculating' | 'proposed' | 'dispatched' | 'completed'>('idle');
@@ -457,6 +598,97 @@ export default function App() {
     };
 
     fetchBalancesReales();
+  }, [sessionUser, activeDevice]);
+
+  // Efecto independiente exclusivo para finanzas y bitácora del abogado
+  useEffect(() => {
+    if (!sessionUser || activeDevice !== 'lawyer') return;
+
+    const fetchFinanzasAbogado = async () => {
+      try {
+        // 1. Obtener ID de public.abogados
+        const { data: lawyerAbg } = await supabase
+          .from('abogados')
+          .select('id')
+          .eq('auth_id', sessionUser.id)
+          .maybeSingle();
+
+        let lAbgId = null;
+        if (lawyerAbg) {
+          lAbgId = lawyerAbg.id;
+        }
+
+        // 2. Obtener saldo_acumulado desde saldos_abogados
+        if (lAbgId) {
+          const { data: sla } = await supabase
+            .from('saldos_abogados')
+            .select('saldo_acumulado')
+            .eq('abogado_id', lAbgId)
+            .maybeSingle();
+          if (sla) {
+            setTotalLawyerEarnings(Number(sla.saldo_acumulado) || 0.00);
+          } else {
+            const { data: slaFallback } = await supabase
+              .from('saldos_abogados')
+              .select('saldo_acumulado')
+              .eq('abogado_id', sessionUser.id)
+              .maybeSingle();
+            if (slaFallback) {
+              setTotalLawyerEarnings(Number(slaFallback.saldo_acumulado) || 0.00);
+            } else {
+              setTotalLawyerEarnings(0.00);
+            }
+          }
+        } else {
+          const { data: slaFallback } = await supabase
+            .from('saldos_abogados')
+            .select('saldo_acumulado')
+            .eq('abogado_id', sessionUser.id)
+            .maybeSingle();
+          if (slaFallback) {
+            setTotalLawyerEarnings(Number(slaFallback.saldo_acumulado) || 0.00);
+          } else {
+            setTotalLawyerEarnings(0.00);
+          }
+        }
+
+        // 3. Obtener id del abogado en public.usuarios (profesional_id en historial_comisiones)
+        const { data: usrRow } = await supabase
+          .from('usuarios')
+          .select('id')
+          .eq('auth_id', sessionUser.id)
+          .maybeSingle();
+
+        const lUsrId = usrRow?.id;
+
+        // 4. Consultar historial_comisiones filtrando por profesional_id
+        if (lUsrId) {
+          const { data: hist, error } = await supabase
+            .from('historial_comisiones')
+            .select('*')
+            .eq('profesional_id', lUsrId)
+            .order('created_at', { ascending: false });
+
+          if (!error && hist) {
+            setLawyerHistory(hist);
+          }
+        } else {
+          const { data: hist, error } = await supabase
+            .from('historial_comisiones')
+            .select('*')
+            .eq('profesional_id', sessionUser.id)
+            .order('created_at', { ascending: false });
+
+          if (!error && hist) {
+            setLawyerHistory(hist);
+          }
+        }
+      } catch (err) {
+        console.error("Error al cargar finanzas y bitácora del abogado:", err);
+      }
+    };
+
+    fetchFinanzasAbogado();
   }, [sessionUser, activeDevice]);
 
   const loadProfileFromDb = async (userId: string, email: string) => {
@@ -919,6 +1151,88 @@ export default function App() {
       supabase.removeChannel(channel);
     };
   }, [activeDevice, towState, sessionUser?.id]);
+
+  // EFECTO NUEVO Y AISLADO: Escucha exclusivamente inserts en 'asistencias_viales' con estado 'pendiente'
+  useEffect(() => {
+    if (activeDevice !== 'driver') return;
+
+    const fetchPendingVialAssistances = async () => {
+      try {
+        const { data: pendingVials, error } = await supabase
+          .from('asistencias_viales')
+          .select('*')
+          .eq('estado', 'pendiente');
+
+        if (!error && pendingVials && pendingVials.length > 0) {
+          const assist = pendingVials[0];
+          
+          // Obtener datos del ciudadano
+          const { data: userData } = await supabase
+            .from('usuarios')
+            .select('nombre_completo, contacto_emergencia_1_telefono')
+            .eq('id', assist.ciudadano_id)
+            .maybeSingle();
+
+          const cName = userData?.nombre_completo || 'Ciudadano';
+          const cPhone = userData?.contacto_emergencia_1_telefono || '';
+
+          // Coordenadas destino e inicio
+          const destCoords = getCoordsFromText(assist.ubicacion_destino_texto || 'Plaza Venezuela');
+          const calculatedKm = calculateDistanceInKm(
+            Number(assist.ubicacion_origen_lat),
+            Number(assist.ubicacion_origen_lng),
+            destCoords.lat,
+            destCoords.lng
+          );
+
+          if (towState === 'idle') {
+            setTowState('proposed');
+            setActiveTowJob({
+              id: assist.id,
+              citizenName: cName,
+              citizenPhone: cPhone,
+              status: 'pending',
+              latitude: Number(assist.ubicacion_origen_lat),
+              longitude: Number(assist.ubicacion_origen_lng),
+              price: Number(assist.costo_total),
+              distance: Math.round(calculatedKm * 1000)
+            });
+            setActiveVialAssist(assist);
+          }
+        }
+      } catch (err) {
+        console.error("Error en fetchPendingVialAssistances:", err);
+      }
+    };
+
+    fetchPendingVialAssistances();
+
+    const channel = supabase
+      .channel('vial-assistance-inserts-isolated')
+      .on(
+        'postgres_changes',
+        { event: 'INSERT', schema: 'public', table: 'asistencias_viales' },
+        (payload) => {
+          if (payload.new && payload.new.estado === 'pendiente') {
+            fetchPendingVialAssistances();
+          }
+        }
+      )
+      .on(
+        'postgres_changes',
+        { event: 'UPDATE', schema: 'public', table: 'asistencias_viales' },
+        (payload) => {
+          if (payload.new && (payload.new.estado === 'pendiente' || payload.new.estado === 'activa')) {
+            fetchPendingVialAssistances();
+          }
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [activeDevice, towState]);
 
   // Real-time synchronization for Ambulance Paramedic Panel
   useEffect(() => {
@@ -2281,23 +2595,48 @@ export default function App() {
   };
 
   // Real synchronized Requesting of visual roadside assistance towing (Insurtech Dispatcher)
-  const handleTowRequest = () => {
-    const distMeters = 3450; // 3.45 KM
-    const distanceInKm = 3.45;
-    
-    // Config values based on user's vehicle profile (Coche vs Moto)
-    const baseFee = citizenVehicleType === 'coche' ? 20.00 : 12.00;
-    const kmRate = citizenVehicleType === 'coche' ? 3.50 : 2.00;
+  const handleTowRequest = async () => {
+    setIsAuthLoading(true);
+    let assignedGrueroId = null;
+    let baseFee = citizenVehicleType === 'coche' ? 20.00 : 12.00;
+    let kmRate = citizenVehicleType === 'coche' ? 3.50 : 2.00;
+
+    try {
+      const { data: qGruero } = await supabase
+        .from('grueros')
+        .select('*')
+        .eq('disponible', true)
+        .limit(1)
+        .maybeSingle();
+
+      if (qGruero) {
+        assignedGrueroId = qGruero.id;
+        baseFee = Number(qGruero.tarifa_base) || baseFee;
+        kmRate = Number(qGruero.precio_km) || kmRate;
+      }
+    } catch (err) {
+      console.error("Error fetching assigned gruero:", err);
+    } finally {
+      setIsAuthLoading(false);
+    }
+
+    const destCoords = getCoordsFromText(towDestinationText);
+    const distanceInKm = calculateDistanceInKm(citizenCoords.lat, citizenCoords.lng, destCoords.lat, destCoords.lng);
+    const distMeters = Math.round(distanceInKm * 1000);
+
     const estimatedPrice = baseFee + distanceInKm * kmRate;
-    
     const driverReceives = estimatedPrice * 0.80;
     const platformFee = estimatedPrice * 0.20;
 
     showMaterialConfirm(
       '🚜 Solicitar Unidad de Grúa Oficial',
-      `Hemos ubicado la grúa oficial disponible para tu zona a 3.45 Km.\n\n` +
-      `Perfil Vehículo: ${citizenVehicleType === 'coche' ? '🚗 Automóvil / Coche' : '🏍️ Motocicleta / Moto'}\n` +
-      `Precio estimado por Km: $${kmRate.toFixed(2)} USD\n\n` +
+      `Hemos ubicado la grúa oficial disponible para tu zona.\n\n` +
+      `• Origen: Caracas Central\n` +
+      `• Destino: ${towDestinationText}\n` +
+      `• Distancia Calculada: ${distanceInKm.toFixed(2)} KM\n` +
+      `• Perfil Vehículo: ${citizenVehicleType === 'coche' ? '🚗 Automóvil / Coche' : '🏍️ Motocicleta / Moto'}\n` +
+      `• Tarifa Base: $${baseFee.toFixed(2)} USD\n` +
+      `• Precio por Km: $${kmRate.toFixed(2)} USD\n\n` +
       `Detalle Financiero Transparente:\n` +
       `• Total debitado a tu saldo: $${estimatedPrice.toFixed(2)} USD\n` +
       `• Acreditado neto al chofer: $${driverReceives.toFixed(2)} USD (80%)\n` +
@@ -2306,17 +2645,6 @@ export default function App() {
       async () => {
         const emerId = generateUUIDv4();
         
-        const initialMeta = {
-          citizenName: citizenProfile.name || 'Ciudadano',
-          citizenPhone: citizenProfile.phone || 'No phone',
-          distance: distMeters,
-          price: estimatedPrice,
-          driverReceives,
-          platformFee,
-          vehicleType: citizenVehicleType,
-          messages: []
-        };
-
         const newJob: TowJob = {
           id: emerId,
           citizenName: citizenProfile.name || 'Ciudadano',
@@ -2331,19 +2659,43 @@ export default function App() {
         setTowState('proposed');
         setActiveTowJob(newJob);
         setTowMessages([]);
+        setTowDailyCoUrl("https://meet.jit.si/SecureFlow-Tow-" + emerId);
 
         try {
-          // Insert row in Supabase so logged in drivers can receive it in real-time
+          // Double Insert: To emergencias_activas (for compatibility) and to asistencias_viales
+          const vialInsertVal = {
+            id: emerId,
+            ciudadano_id: sessionUser?.id || null,
+            gruero_id: assignedGrueroId,
+            ubicacion_origen_lat: citizenCoords.lat,
+            ubicacion_origen_lng: citizenCoords.lng,
+            ubicacion_destino_texto: towDestinationText,
+            estado: 'pendiente',
+            costo_total: estimatedPrice,
+            sala_webrtc_url: "https://meet.jit.si/SecureFlow-Tow-" + emerId
+          };
+
+          const { data: insertedVialRow } = await supabase
+            .from('asistencias_viales')
+            .insert(vialInsertVal)
+            .select()
+            .maybeSingle();
+
+          if (insertedVialRow) {
+            setActiveVialAssist(insertedVialRow);
+          }
+
           await supabase.from('emergencias_activas').insert({
             id: emerId,
             ciudadano_id: sessionUser?.id || null,
-            estado: 'buscando',
-            ubicacion_texto: citizenProfile.city || 'Caracas',
+            estado: 'pending',
+            ubicacion_texto: towDestinationText,
             ubicacion_lat: citizenCoords.lat,
             ubicacion_lng: citizenCoords.lng,
             tarifa_aplicada: estimatedPrice,
             sala_webrtc_url: "https://meet.jit.si/SecureFlow-Tow-" + emerId
           });
+
           triggerPush('🚜 Alerta Solicitud Grúa', 'Buscando unidad de grúa disponible en el sector...');
         } catch (e) {
           console.error("Error creating pending tow row in Supabase:", e);
@@ -2476,13 +2828,59 @@ export default function App() {
 
           // Sincronización en tiempo real posterior en el frontend de saldos actualizados
           if (sessionUser?.id) {
-            const { data: sla } = await supabase
-              .from('saldos_abogados')
-              .select('saldo_acumulado')
-              .eq('abogado_id', sessionUser.id)
+            const { data: lawyerAbg } = await supabase
+              .from('abogados')
+              .select('id')
+              .eq('auth_id', sessionUser.id)
               .maybeSingle();
-            if (sla) {
-              setTotalLawyerEarnings(Number(sla.saldo_acumulado) || 0.00);
+
+            const lAbgId = lawyerAbg?.id;
+
+            if (lAbgId) {
+              const { data: sla } = await supabase
+                .from('saldos_abogados')
+                .select('saldo_acumulado')
+                .eq('abogado_id', lAbgId)
+                .maybeSingle();
+              if (sla) {
+                setTotalLawyerEarnings(Number(sla.saldo_acumulado) || 0.00);
+              }
+            } else {
+              const { data: slaFallback } = await supabase
+                .from('saldos_abogados')
+                .select('saldo_acumulado')
+                .eq('abogado_id', sessionUser.id)
+                .maybeSingle();
+              if (slaFallback) {
+                setTotalLawyerEarnings(Number(slaFallback.saldo_acumulado) || 0.00);
+              }
+            }
+
+            const { data: usrRow } = await supabase
+              .from('usuarios')
+              .select('id')
+              .eq('auth_id', sessionUser.id)
+              .maybeSingle();
+
+            const lUsrId = usrRow?.id;
+            if (lUsrId) {
+              const { data: hist } = await supabase
+                .from('historial_comisiones')
+                .select('*')
+                .eq('profesional_id', lUsrId)
+                .order('created_at', { ascending: false });
+              if (hist) {
+                setLawyerHistory(hist);
+              }
+            } else {
+              const { data: hist } = await supabase
+                .from('historial_comisiones')
+                .select('*')
+                .eq('profesional_id', sessionUser.id)
+                .order('created_at', { ascending: false });
+              if (hist) {
+                setLawyerHistory(hist);
+              }
             }
           }
 
@@ -2522,6 +2920,55 @@ export default function App() {
     if (!activeTowJob) return;
 
     try {
+      // Find current gruero row first
+      let grueroId = null;
+      try {
+        const { data: qGruero } = await supabase
+          .from('grueros')
+          .select('id')
+          .eq('auth_id', sessionUser?.id)
+          .maybeSingle();
+        if (qGruero) {
+          grueroId = qGruero.id;
+        }
+      } catch (err) {
+        console.error("Error querying gruero uuid:", err);
+      }
+
+      // Update asistencias_viales to 'activa'
+      await supabase
+        .from('asistencias_viales')
+        .update({
+          estado: 'activa',
+          gruero_id: grueroId || null
+        })
+        .eq('id', activeTowJob.id);
+
+      // Query or create units of this gruero
+      if (grueroId) {
+        const { data: craneUnit } = await supabase
+          .from('unidades_grua')
+          .select('*')
+          .eq('gruero_id', grueroId)
+          .maybeSingle();
+        
+        if (craneUnit) {
+          setCraneUnitState({
+            lat_actual: Number(craneUnit.lat_actual) || 10.4900,
+            lng_actual: Number(craneUnit.lng_actual) || -66.9100
+          });
+        } else {
+          const newUnit = {
+            gruero_id: grueroId,
+            estado: 'en_ruta',
+            lat_actual: 10.4900,
+            lng_actual: -66.9100
+          };
+          await supabase.from('unidades_grua').insert(newUnit);
+          setCraneUnitState({ lat_actual: 10.4900, lng_actual: -66.9100 });
+        }
+      }
+
       // Update Supabase to dispatched and set driver (abogado_id)
       const { error } = await supabase
         .from('emergencias_activas')
@@ -2802,6 +3249,12 @@ export default function App() {
               .update({ estado: 'finalizada' })
               .eq('id', activeTowJob.id);
             if (towUpdateErr) throw towUpdateErr;
+
+            // Update asistencias_viales table state in DB
+            await supabase
+              .from('asistencias_viales')
+              .update({ estado: 'completado' })
+              .eq('id', activeTowJob.id);
 
             // B. Debit total amount from saldos
             const { data: balanceRow } = await supabase
@@ -3625,36 +4078,14 @@ export default function App() {
                               </div>
                             </div>
 
-                            {/* Simulated moving vector map */}
-                            <div className="h-28 bg-immersive-dark rounded-xl border border-white/5 relative overflow-hidden flex items-center justify-center">
-                              {/* Simple grid path */}
-                              <svg className="absolute inset-0 w-full h-full opacity-10" width="100%" height="100%">
-                                <defs>
-                                  <pattern id="grid" width="20" height="20" patternUnits="userSpaceOnUse">
-                                    <path d="M 20 0 L 0 0 0 20" fill="none" stroke="white" strokeWidth="1" />
-                                  </pattern>
-                                </defs>
-                                <rect width="100%" height="100%" fill="url(#grid)" />
-                              </svg>
-
-                              {/* Path indicator */}
-                              <div className="absolute w-2 h-2 rounded-full bg-indigo-500 shrink-0 select-none animate-ping" style={{ left: '40%', top: '30%' }} />
-                              <div className="absolute text-[18px] select-none" style={{ left: '38%', top: '24%' }}>👤</div>
-                              
-                              {/* Moving Truck */}
-                              <div 
-                                className="absolute text-[22px] select-none transition-all duration-1000 ease-out"
-                                style={{ 
-                                  left: `${45 + (10.4900 - towDriverCoords.lat) * 5000}%`, 
-                                  top: `${60 + (-66.9100 - towDriverCoords.lng) * 5000}%` 
-                                }}
-                              >
-                                🚜
-                              </div>
-
-                              <div className="absolute bottom-2 left-3 text-[10px] text-slate-400 font-mono">
-                                Distancia: {activeTowJob.distance} metros
-                              </div>
+                            {/* Live road tracking map */}
+                            <div className="h-48 rounded-xl border border-indigo-500/20 overflow-hidden relative">
+                              <RoadsideMap
+                                driverLat={craneUnitState?.lat_actual || 10.4900}
+                                driverLng={craneUnitState?.lng_actual || -66.9100}
+                                citizenLat={activeTowJob.latitude || citizenCoords.lat}
+                                citizenLng={activeTowJob.longitude || citizenCoords.lng}
+                              />
                             </div>
 
                             <button 
@@ -3857,6 +4288,43 @@ export default function App() {
                           </div>
                         )}
 
+                        {/* Daily.co Call container when Tow is Active */}
+                        {isTowDailyCoActive && (
+                          <div className="bg-slate-900 border-b border-indigo-500/15 flex flex-col shrink-0">
+                            <div className="bg-indigo-950/45 px-3 py-2 border-b border-indigo-900/10 flex justify-between items-center text-[10px]">
+                              <span className="text-indigo-400 font-extrabold flex items-center gap-1.5 uppercase">
+                                <span className="w-1.5 h-1.5 bg-indigo-500 rounded-full animate-ping" />
+                                Videotransmisión de Grúa Activa (WebRTC)
+                              </span>
+                              <span className="text-slate-400 font-mono text-[9px]">
+                                Conductor: {activeTowJob?.driverName || 'Operador Oficial'}
+                              </span>
+                            </div>
+                            
+                            {/* Interactive daily.co iframe */}
+                            <div className="h-44 bg-slate-950 relative">
+                              <iframe 
+                                src={towDailyCoUrl || activeVialAssist?.sala_webrtc_url || ("https://iframe.daily.co/secureflow-tow-" + activeTowJob?.id)}
+                                allow="camera; microphone; fullscreen"
+                                className="w-full h-full border-0"
+                                title="Daily.co Tow Assistance"
+                              />
+                            </div>
+                            
+                            <div className="p-2 bg-slate-900/90 flex justify-between items-center border-t border-white/5">
+                              <p className="text-[9px] text-slate-400">Canal de audio/video de seguridad.</p>
+                              <button 
+                                onClick={() => {
+                                  setIsTowDailyCoActive(false);
+                                }}
+                                className="px-3 py-1 bg-red-650 hover:bg-red-700 text-white font-black text-[9px] uppercase rounded-lg shadow-lg"
+                              >
+                                Apagar Video
+                              </button>
+                            </div>
+                          </div>
+                        )}
+
                         {/* Messages Area */}
                         <div ref={agentScrollRef} className="flex-1 p-3 space-y-3 overflow-y-auto max-h-[340px] scrollbar-thin">
                           
@@ -3900,6 +4368,27 @@ export default function App() {
                               <div className="w-[2.5px] h-[12px] bg-blue-400 rounded-sm animate-pulse duration-500" />
                               <div className="w-[2.5px] h-[6px] bg-blue-300 rounded-sm animate-pulse" />
                             </div>
+                          </div>
+                        )}
+
+                        {/* Tow WebRTC connection quick button for citizen */}
+                        {towState === 'dispatched' && (
+                          <div className="p-2 bg-slate-900/40 border-t border-slate-800/60 flex justify-between items-center px-3 shrink-0">
+                            <span className="text-[9px] text-slate-400">¿Necesitas mostrar la vía o el estado de tu vehículo?</span>
+                            <button
+                              onClick={() => {
+                                setIsTowDailyCoActive(!isTowDailyCoActive);
+                                const webrtcUrl = activeVialAssist?.sala_webrtc_url || (activeTowJob ? "https://iframe.daily.co/secureflow-tow-" + activeTowJob.id : "");
+                                setTowDailyCoUrl(webrtcUrl);
+                              }}
+                              className={`px-3 py-1 rounded-lg text-[9px] font-black uppercase tracking-wider border transition-all ${
+                                isTowDailyCoActive 
+                                  ? 'bg-red-650 hover:bg-red-750 text-white border-red-500/30' 
+                                  : 'bg-indigo-650 hover:bg-indigo-550 text-white border-indigo-500/30 shadow'
+                              }`}
+                            >
+                              {isTowDailyCoActive ? '📹 Ocultar Video' : '📹 Conectar Video (WebRTC)'}
+                            </button>
                           </div>
                         )}
 
@@ -4793,13 +5282,25 @@ export default function App() {
                         <div className="space-y-2">
                           <span className="text-[10px] text-slate-400 uppercase tracking-widest font-bold">Bitácora de Casos Resueltos</span>
                           
-                          <div className="p-3 bg-slate-900/60 border border-slate-800 rounded-xl flex justify-between items-center text-xs">
-                            <div>
-                              <h5 className="font-bold text-white">Caso #SF-401</h5>
-                              <p className="text-[10px] text-slate-400">Amparo COPP Art. 191 • Caracas</p>
+                          {lawyerHistory.length > 0 ? (
+                            lawyerHistory.map((item, idx) => (
+                              <div key={item.id || idx} className="p-3 bg-slate-900/60 border border-slate-800 rounded-xl flex justify-between items-center text-xs">
+                                <div>
+                                  <h5 className="font-bold text-white uppercase">Sesión #{item.emergencia_id || 'SOS-N/A'}</h5>
+                                  <p className="text-[10px] text-slate-400">
+                                    {item.servicio || 'Defensa Legal'} • {item.created_at ? new Date(item.created_at).toLocaleDateString('es-VE', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : 'Reciente'}
+                                  </p>
+                                </div>
+                                <span className="font-mono text-emerald-400 font-bold">
+                                  +${Number(item.ganancia_profesional || 0).toFixed(2)}
+                                </span>
+                              </div>
+                            ))
+                          ) : (
+                            <div className="p-4 bg-slate-900/30 border border-dashed border-slate-800/80 rounded-xl text-center text-[11px] text-slate-500 font-medium">
+                              Aún no hay casos resueltos
                             </div>
-                            <span className="font-mono text-emerald-400 font-bold">+$13.50</span>
-                          </div>
+                          )}
                         </div>
                       </div>
                     )}
@@ -4941,16 +5442,46 @@ export default function App() {
                                   <span className="text-[10px] text-slate-400 font-mono">ID: {activeTowJob.id.substring(0, 8).toUpperCase()}</span>
                                 </div>
 
-                                {/* Street map tracking simulation */}
-                                <div className="h-32 bg-slate-950 rounded-2xl border border-slate-900 flex items-center justify-center relative overflow-hidden">
-                                  <span className="text-4xl opacity-30">🗺️</span>
-                                  <div className="absolute inset-2 border border-slate-800/10 rounded-xl" />
-                                  <div className="absolute top-3 left-3 text-[10px] text-slate-400">
-                                    Ruta al asegurado: Caracas Central
+                                {/* Street map tracking active real Leaflet component */}
+                                <div className="h-56 rounded-2xl border border-slate-800 overflow-hidden relative shadow-lg">
+                                  <RoadsideMap
+                                    driverLat={craneUnitState?.lat_actual || 10.4900}
+                                    driverLng={craneUnitState?.lng_actual || -66.9100}
+                                    citizenLat={activeTowJob.latitude || 10.4984}
+                                    citizenLng={activeTowJob.longitude || -66.8824}
+                                  />
+                                </div>
+
+                                {/* Active daily.co WebRTC Video control for driver sync */}
+                                <div className="bg-slate-950 p-2.5 rounded-2xl border border-slate-800/60 space-y-2.5">
+                                  <div className="flex justify-between items-center">
+                                    <span className="text-[9px] text-slate-400 font-bold uppercase">Transmisión de Video</span>
+                                    <button
+                                      onClick={() => {
+                                        setIsTowDailyCoActive(!isTowDailyCoActive);
+                                        const webrtcUrl = activeVialAssist?.sala_webrtc_url || ("https://iframe.daily.co/secureflow-tow-" + activeTowJob.id);
+                                        setTowDailyCoUrl(webrtcUrl);
+                                      }}
+                                      className={`px-3 py-1 rounded-xl text-[9px] font-black uppercase tracking-wider border transition-all ${
+                                        isTowDailyCoActive 
+                                          ? 'bg-red-650 hover:bg-red-750 text-white border-red-500/35' 
+                                          : 'bg-indigo-650 hover:bg-indigo-550 text-white border-indigo-500/35 shadow'
+                                      }`}
+                                    >
+                                      {isTowDailyCoActive ? '📹 Ocultar Stream' : '📹 Activar Cámara (WebRTC)'}
+                                    </button>
                                   </div>
-                                  <span className="absolute text-xs p-1.5 bg-slate-900 rounded border border-slate-800 text-white font-mono font-bold">
-                                    Distancia Restante: {activeTowJob.distance} m
-                                  </span>
+
+                                  {isTowDailyCoActive && (
+                                    <div className="h-44 bg-slate-950 rounded-xl overflow-hidden relative border border-indigo-505/20">
+                                      <iframe 
+                                        src={towDailyCoUrl || activeVialAssist?.sala_webrtc_url || ("https://iframe.daily.co/secureflow-tow-" + activeTowJob.id)}
+                                        allow="camera; microphone; fullscreen"
+                                        className="w-full h-full border-0"
+                                        title="Daily.co Tow Driver stream"
+                                      />
+                                    </div>
+                                  )}
                                 </div>
 
                                 {/* Quick messages log panel to driver */}

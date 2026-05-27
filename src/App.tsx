@@ -36,45 +36,6 @@ function generateUUIDv4() {
   });
 }
 
-async function safeUpdateEmergencyState(id: string, proposedState: string) {
-  const { error } = await supabase
-    .from('emergencias_activas')
-    .update({ estado: proposedState })
-    .eq('id', id);
-
-  if (!error) {
-    console.log(`[SAFE STATE UPDATE] Estado actualizado con éxito a: '${proposedState}'`);
-    return { success: true, estado: proposedState };
-  }
-
-  console.warn(`[SAFE STATE UPDATE] Falló estado propuesto '${proposedState}' para la emergencia ${id}. Error:`, error);
-
-  if (error.message && (error.message.includes('check constraint') || error.message.includes('violates check constraint') || String(error.code) === '23514')) {
-    const fallbacks: Record<string, string[]> = {
-      'resuelta': ['completed', 'completada', 'active'],
-      'buscando': ['calling', 'pending', 'active'],
-      'activa': ['active', 'dispatched', 'pending']
-    };
-
-    const list = fallbacks[proposedState] || [];
-    for (const altState of list) {
-      console.log(`[SAFE STATE UPDATE] Probando estado alternativo '${altState}'...`);
-      const { error: altError } = await supabase
-        .from('emergencias_activas')
-        .update({ estado: altState })
-        .eq('id', id);
-
-      if (!altError) {
-        console.log(`[SAFE STATE UPDATE] ¡Éxito con el estado alternativo '${altState}'!`);
-        return { success: true, estado: altState };
-      }
-      console.warn(`[SAFE STATE UPDATE] El estado alternativo '${altState}' también falló:`, altError);
-    }
-  }
-
-  throw error;
-}
-
 const SecureFlowLogoCustom = ({ className = "w-16 h-16" }: { className?: string }) => {
   return (
     <div className={`relative flex items-center justify-center ${className}`}>
@@ -320,25 +281,17 @@ export default function App() {
   const [completedMedicSessions, setCompletedMedicSessions] = useState<number>(0);
 
   // Chat engines
-  const [agentMessages, setAgentMessages] = useState<Message[]>([
-    { sender: 'bot', text: '👋 Hola. Soy tu Agente Colectivo de Asistencia 24/7 de SecureFlow. Analizo leyes de Venezuela en tiempo real para proteger tus derechos. ¿Qué está sucediendo?', time: '19:55' }
-  ]);
+  const [agentMessages, setAgentMessages] = useState<Message[]>([]);
   const [agentInput, setAgentInput] = useState('');
   
-  const [lawyerAgentMessages, setLawyerAgentMessages] = useState<Message[]>([
-    { sender: 'bot', text: '⚖️ Colega, bienvenido al asistente legal técnico de SecureFlow. Aquí puedes consultar el Código Orgánico Procesal Penal (COPP), Constitución (CRBV) y jurisprudencia penal de Venezuela de inmediato. ¿Qué artículo o situación penal deseas consultar?', time: '19:55' }
-  ]);
+  const [lawyerAgentMessages, setLawyerAgentMessages] = useState<Message[]>([]);
   const [lawyerAgentInput, setLawyerAgentInput] = useState('');
 
   // AI assistant states for Paramedic and Doctor
-  const [ambulanceAgentMessages, setAmbulanceAgentMessages] = useState<Message[]>([
-    { sender: 'bot', text: '🚑 Bienvenido al Asistente de Trauma AI de SecureFlow. ¿Cómo puedo auxiliarle con protocolos clínicos de resguardo o soporte vital avanzado?', time: '19:55' }
-  ]);
+  const [ambulanceAgentMessages, setAmbulanceAgentMessages] = useState<Message[]>([]);
   const [ambulanceAgentInput, setAmbulanceAgentInput] = useState('');
 
-  const [medicAgentMessages, setMedicAgentMessages] = useState<Message[]>([
-    { sender: 'bot', text: '🩺 Bienvenido al Asistente de Diagnóstico y Triaje Clínico AI. Puedes consultarme dosis, interacciones farmacológicas o triage primario.', time: '19:55' }
-  ]);
+  const [medicAgentMessages, setMedicAgentMessages] = useState<Message[]>([]);
   const [medicAgentInput, setMedicAgentInput] = useState('');
 
   // Interactive Live Windows & Daily.co toggles
@@ -1395,7 +1348,7 @@ export default function App() {
     }
 
     try {
-      const res = await fetch('/api/webhook-proxy', {
+      const res = await fetch('https://panel1.quickai.agency/webhook/abogadosya-agente', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -1462,7 +1415,7 @@ export default function App() {
     setIsIAPending(true);
 
     try {
-      const res = await fetch('/api/webhook-proxy', {
+      const res = await fetch('https://panel1.quickai.agency/webhook/abogadosya-agente', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -1510,7 +1463,7 @@ export default function App() {
     setIsDriverSupportPending(true);
 
     try {
-      const res = await fetch('/api/webhook-proxy', {
+      const res = await fetch('https://panel1.quickai.agency/webhook/abogadosya-agente', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -1882,7 +1835,7 @@ export default function App() {
     setIsAmbulanceSupportPending(true);
 
     try {
-      const res = await fetch('/api/webhook-proxy', {
+      const res = await fetch('https://panel1.quickai.agency/webhook/abogadosya-agente', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -1928,7 +1881,7 @@ export default function App() {
     setIsMedicSupportPending(true);
 
     try {
-      const res = await fetch('/api/webhook-proxy', {
+      const res = await fetch('https://panel1.quickai.agency/webhook/abogadosya-agente', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -2377,7 +2330,12 @@ export default function App() {
         setIsAuthLoading(true);
         try {
           // Resolve emergency row
-          await safeUpdateEmergencyState(activeEmergency.id, 'resuelta');
+          const { error: updateErr } = await supabase
+            .from('emergencias_activas')
+            .update({ estado: 'finalizada' })
+            .eq('id', activeEmergency.id);
+
+          if (updateErr) throw updateErr;
 
           // Deduct balance from citizen and accrue lawyer earnings in saldos table
           const { data: emerData } = await supabase
@@ -2612,7 +2570,7 @@ export default function App() {
     setAmbulanceAgentMessages(newMsgs);
     setAmbulanceAgentInput('');
     try {
-      const res = await fetch('/api/webhook-proxy', {
+      const res = await fetch('https://panel1.quickai.agency/webhook/abogadosya-agente', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ text })
@@ -2633,7 +2591,7 @@ export default function App() {
     setMedicAgentMessages(newMsgs);
     setMedicAgentInput('');
     try {
-      const res = await fetch('/api/webhook-proxy', {
+      const res = await fetch('https://panel1.quickai.agency/webhook/abogadosya-agente', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ text })
@@ -2695,7 +2653,11 @@ export default function App() {
             setIsAuthLoading(true);
 
             // A. Update emergency state in DB
-            await safeUpdateEmergencyState(activeTowJob.id, 'resuelta');
+            const { error: towUpdateErr } = await supabase
+              .from('emergencias_activas')
+              .update({ estado: 'finalizada' })
+              .eq('id', activeTowJob.id);
+            if (towUpdateErr) throw towUpdateErr;
 
             // B. Debit total amount from saldos
             const { data: balanceRow } = await supabase
@@ -2807,7 +2769,11 @@ export default function App() {
             setIsAuthLoading(true);
 
             // A. Update emergency state in DB
-            await safeUpdateEmergencyState(activeAmbulanceJob.id, 'resuelta');
+            const { error: ambUpdateErr } = await supabase
+              .from('emergencias_activas')
+              .update({ estado: 'finalizada' })
+              .eq('id', activeAmbulanceJob.id);
+            if (ambUpdateErr) throw ambUpdateErr;
 
             // B. Debit total amount from saldos
             const { data: balanceRow } = await supabase
@@ -5555,7 +5521,11 @@ export default function App() {
                           <button 
                             onClick={async () => {
                               try {
-                                await safeUpdateEmergencyState(activeMedicEmergency.id, 'resuelta');
+                                const { error: medUpdateErr } = await supabase
+                                  .from('emergencias_activas')
+                                  .update({ estado: 'finalizada' })
+                                  .eq('id', activeMedicEmergency.id);
+                                if (medUpdateErr) throw medUpdateErr;
                               } catch (e) {
                                 console.error(e);
                               }

@@ -260,7 +260,6 @@ export default function App() {
   const [proposedTariff, setProposedTariff] = useState<number>(15);
   const [lawyerTariffs, setLawyerTariffs] = useState({ min15: 15, min30: 25, hour1: 45 });
   const [totalLawyerEarnings, setTotalLawyerEarnings] = useState<number>(0);
-  const [lawyerCommissions, setLawyerCommissions] = useState<any[]>([]);
   const [completedLawyerSessions, setCompletedLawyerSessions] = useState<number>(0);
   const [isLawyerOnline, setIsLawyerOnline] = useState<boolean>(true);
 
@@ -427,7 +426,7 @@ export default function App() {
     }
   }, [activeDevice, sessionUser]);
 
-  // Sincronización en tiempo real de saldos reales de base de datos y bitácora
+  // Sincronización en tiempo real de saldos reales de base de datos
   useEffect(() => {
     if (!sessionUser) return;
     
@@ -443,59 +442,13 @@ export default function App() {
             setCitizenBalance(Number(saldoData.creditos_disponibles));
           }
         } else if (activeDevice === 'lawyer') {
-          // A. Encontrar ID de public.abogados para el abogado
-          let lawyerRealId = sessionUser.id;
-          const { data: lawyerAbg } = await supabase
-            .from('abogados')
-            .select('id')
-            .eq('auth_id', sessionUser.id)
-            .maybeSingle();
-          if (lawyerAbg) {
-            lawyerRealId = lawyerAbg.id;
-          }
-
-          // B. Encontrar ID de public.usuarios para el abogado (profesional_id)
-          let lawyerProfId = sessionUser.id;
-          const { data: lawyerUserRow } = await supabase
-            .from('usuarios')
-            .select('id')
-            .eq('auth_id', sessionUser.id)
-            .maybeSingle();
-          if (lawyerUserRow) {
-            lawyerProfId = lawyerUserRow.id;
-          }
-
-          // C. Consultar saldo real de saldos_abogados
           const { data: sla } = await supabase
             .from('saldos_abogados')
             .select('saldo_acumulado')
-            .eq('abogado_id', lawyerRealId)
+            .eq('abogado_id', sessionUser.id)
             .maybeSingle();
           if (sla) {
             setTotalLawyerEarnings(Number(sla.saldo_acumulado) || 0.00);
-          } else {
-            setTotalLawyerEarnings(0.00);
-          }
-
-          // D. Consultar historial_comisiones real
-          const { data: comisiones } = await supabase
-            .from('historial_comisiones')
-            .select('*')
-            .or(`profesional_id.eq.${lawyerProfId},profesional_id.eq.${lawyerRealId}`)
-            .order('id', { ascending: false });
-          if (comisiones) {
-            setLawyerCommissions(comisiones);
-          } else {
-            // Intento sin ordenamiento por si falla la columna id
-            const { data: comisionesFallback } = await supabase
-              .from('historial_comisiones')
-              .select('*')
-              .or(`profesional_id.eq.${lawyerProfId},profesional_id.eq.${lawyerRealId}`);
-            if (comisionesFallback) {
-              setLawyerCommissions(comisionesFallback);
-            } else {
-              setLawyerCommissions([]);
-            }
           }
         }
       } catch (err) {
@@ -563,55 +516,16 @@ export default function App() {
             licenseNumber: 'INPRE-98.421',
             specialty: 'Derecho Constitucional & Penal'
           });
-          // Cargar saldo real del abogado e historial
-          let lawyerRealId = userId;
-          const { data: lawyerAbg } = await supabase
-            .from('abogados')
-            .select('id')
-            .eq('auth_id', userId)
-            .maybeSingle();
-          if (lawyerAbg) {
-            lawyerRealId = lawyerAbg.id;
-          }
-
-          let lawyerProfId = userId;
-          const { data: lawyerUserRow } = await supabase
-            .from('usuarios')
-            .select('id')
-            .eq('auth_id', userId)
-            .maybeSingle();
-          if (lawyerUserRow) {
-            lawyerProfId = lawyerUserRow.id;
-          }
-
+          // Cargar saldo real del abogado
           const { data: sla } = await supabase
             .from('saldos_abogados')
             .select('saldo_acumulado')
-            .eq('abogado_id', lawyerRealId)
+            .eq('abogado_id', userId)
             .maybeSingle();
           if (sla) {
             setTotalLawyerEarnings(Number(sla.saldo_acumulado) || 0.00);
           } else {
             setTotalLawyerEarnings(0.00);
-          }
-
-          const { data: comisiones } = await supabase
-            .from('historial_comisiones')
-            .select('*')
-            .or(`profesional_id.eq.${lawyerProfId},profesional_id.eq.${lawyerRealId}`)
-            .order('id', { ascending: false });
-          if (comisiones) {
-            setLawyerCommissions(comisiones);
-          } else {
-            const { data: comisionesFallback } = await supabase
-              .from('historial_comisiones')
-              .select('*')
-              .or(`profesional_id.eq.${lawyerProfId},profesional_id.eq.${lawyerRealId}`);
-            if (comisionesFallback) {
-              setLawyerCommissions(comisionesFallback);
-            } else {
-              setLawyerCommissions([]);
-            }
           }
         } else if (finalRole === 'driver') {
           setDriverProfile({
@@ -2560,33 +2474,15 @@ export default function App() {
 
           if (rpcError) throw rpcError;
 
-          // Sincronización en tiempo real posterior en el frontend de saldos actualizados e historial
-          if (lawyerAbogadoId) {
+          // Sincronización en tiempo real posterior en el frontend de saldos actualizados
+          if (sessionUser?.id) {
             const { data: sla } = await supabase
               .from('saldos_abogados')
               .select('saldo_acumulado')
-              .eq('abogado_id', lawyerAbogadoId)
+              .eq('abogado_id', sessionUser.id)
               .maybeSingle();
             if (sla) {
               setTotalLawyerEarnings(Number(sla.saldo_acumulado) || 0.00);
-            }
-          }
-
-          // Consultar historial_comisiones real para refrescar la bitácora
-          const { data: comisiones } = await supabase
-            .from('historial_comisiones')
-            .select('*')
-            .or(`profesional_id.eq.${lawyerTableId},profesional_id.eq.${lawyerAbogadoId}`)
-            .order('id', { ascending: false });
-          if (comisiones) {
-            setLawyerCommissions(comisiones);
-          } else {
-            const { data: comisionesFallback } = await supabase
-              .from('historial_comisiones')
-              .select('*')
-              .or(`profesional_id.eq.${lawyerTableId},profesional_id.eq.${lawyerAbogadoId}`);
-            if (comisionesFallback) {
-              setLawyerCommissions(comisionesFallback);
             }
           }
 
@@ -4895,45 +4791,15 @@ export default function App() {
                         </div>
 
                         <div className="space-y-2">
-                          <span className="text-[10px] text-slate-400 uppercase tracking-widest font-bold font-mono">Bitácora de Casos Resueltos</span>
+                          <span className="text-[10px] text-slate-400 uppercase tracking-widest font-bold">Bitácora de Casos Resueltos</span>
                           
-                          {lawyerCommissions.length === 0 ? (
-                            <div className="p-4 rounded-xl border border-slate-800 bg-slate-900/40 text-center text-slate-500 text-[11px] font-medium">
-                              No hay casos registrados
+                          <div className="p-3 bg-slate-900/60 border border-slate-800 rounded-xl flex justify-between items-center text-xs">
+                            <div>
+                              <h5 className="font-bold text-white">Caso #SF-401</h5>
+                              <p className="text-[10px] text-slate-400">Amparo COPP Art. 191 • Caracas</p>
                             </div>
-                          ) : (
-                            lawyerCommissions.map((com, index) => {
-                              const rawDate = com.created_at || com.fecha;
-                              let formattedDate = "Hoy";
-                              if (rawDate) {
-                                try {
-                                  const d = new Date(rawDate);
-                                  if (!isNaN(d.getTime())) {
-                                    formattedDate = d.toLocaleString('es-VE', { 
-                                      day: '2-digit', 
-                                      month: '2-digit', 
-                                      year: 'numeric',
-                                      hour: '2-digit',
-                                      minute: '2-digit'
-                                    });
-                                  }
-                                } catch (e) {
-                                  formattedDate = String(rawDate);
-                                }
-                              }
-                              return (
-                                <div key={com.id || index} className="p-3 bg-slate-900/60 border border-slate-800 rounded-xl flex justify-between items-center text-xs">
-                                  <div>
-                                    <h5 className="font-bold text-white capitalize">{com.servicio || 'Defensa Penal'}</h5>
-                                    <p className="text-[10px] text-slate-400">{formattedDate} • Caracas</p>
-                                  </div>
-                                  <span className="font-mono text-emerald-400 font-bold">
-                                    +${Number(com.ganancia_profesional || 0).toFixed(2)}
-                                  </span>
-                                </div>
-                              );
-                            })
-                          )}
+                            <span className="font-mono text-emerald-400 font-bold">+$13.50</span>
+                          </div>
                         </div>
                       </div>
                     )}

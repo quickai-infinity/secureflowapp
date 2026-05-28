@@ -180,68 +180,94 @@ const calculateDistanceInKm = (lat1: number, lon1: number, lat2: number, lon2: n
 // Componente de Mapa de Asistencia Vial (Leaflet dinámico)
 function RoadsideMap({ driverLat, driverLng, citizenLat, citizenLng }: { driverLat: number, driverLng: number, citizenLat: number, citizenLng: number }) {
   const mapRef = useRef<HTMLDivElement>(null);
-  const leafletMapInstanceRef = useRef<any>(null);
+  const mapInstanceRef = useRef<any>(null);
+  const driverMarkerRef = useRef<any>(null);
+  const citizenMarkerRef = useRef<any>(null);
+  const polylineRef = useRef<any>(null);
 
   useEffect(() => {
     let active = true;
-    
-    const initLeaflet = () => {
+
+    const initOrUpdateLeaflet = () => {
       // @ts-ignore
-      if (!window.L) {
+      const L = window.L;
+      if (!L) {
         setTimeout(() => {
-          if (active) initLeaflet();
+          if (active) initOrUpdateLeaflet();
         }, 300);
         return;
       }
 
-      // @ts-ignore
-      const L = window.L;
       if (!mapRef.current) return;
 
-      if (leafletMapInstanceRef.current) {
-        leafletMapInstanceRef.current.remove();
-      }
-
       try {
-        const map = L.map(mapRef.current).setView([citizenLat, citizenLng], 14);
-        leafletMapInstanceRef.current = map;
+        const dLat = Number(driverLat) || 10.4900;
+        const dLng = Number(driverLng) || -66.9100;
+        const cLat = Number(citizenLat) || 10.4984;
+        const cLng = Number(citizenLng) || -66.8824;
 
-        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-          attribution: '© OpenStreetMap contributors'
-        }).addTo(map);
+        if (!mapInstanceRef.current) {
+          // Initialize map once
+          const map = L.map(mapRef.current, {
+            zoomControl: false,
+            attributionControl: false
+          }).setView([cLat, cLng], 14);
+          
+          mapInstanceRef.current = map;
 
-        // Marker Grúa (Driver)
-        const driverIcon = L.divIcon({
-          html: '<div style="font-size: 26px; filter: drop-shadow(0 2px 4px rgba(0,0,0,0.4));">🚜</div>',
-          className: 'custom-div-icon',
-          iconSize: [26, 26],
-          iconAnchor: [13, 13]
-        });
-        L.marker([driverLat, driverLng], { icon: driverIcon }).addTo(map)
-          .bindPopup('<b>Unidad de Grúa</b><br/>Ubicación en tiempo real')
-          .openPopup();
+          L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(map);
 
-        // Marker Asegurado (Citizen)
-        const citizenIcon = L.divIcon({
-          html: '<div style="font-size: 26px; filter: drop-shadow(0 2px 4px rgba(0,0,0,0.4));">👤</div>',
-          className: 'custom-div-icon',
-          iconSize: [26, 26],
-          iconAnchor: [13, 13]
-        });
-        L.marker([citizenLat, citizenLng], { icon: citizenIcon }).addTo(map)
-          .bindPopup('<b>Asegurado (Ubicación Origen)</b>');
+          // Marker Grúa (Driver)
+          const driverIcon = L.divIcon({
+            html: '<div style="font-size: 26px; filter: drop-shadow(0 2px 4px rgba(0,0,0,0.4));">🚜</div>',
+            className: 'custom-div-icon',
+            iconSize: [26, 26],
+            iconAnchor: [13, 13]
+          });
+          driverMarkerRef.current = L.marker([dLat, dLng], { icon: driverIcon }).addTo(map)
+            .bindPopup('<b>Unidad de Grúa</b><br/>Ubicación en tiempo real');
 
-        // Polyline de ruta
-        const latlngs = [
-          [driverLat, driverLng],
-          [citizenLat, citizenLng]
-        ];
-        L.polyline(latlngs, { color: '#fbbf24', weight: 4, dashArray: '5, 10' }).addTo(map);
-        
-        const bounds = L.latLngBounds(latlngs);
-        map.fitBounds(bounds, { padding: [40, 40] });
+          // Marker Asegurado (Citizen)
+          const citizenIcon = L.divIcon({
+            html: '<div style="font-size: 26px; filter: drop-shadow(0 2px 4px rgba(0,0,0,0.4));">👤</div>',
+            className: 'custom-div-icon',
+            iconSize: [26, 26],
+            iconAnchor: [13, 13]
+          });
+          citizenMarkerRef.current = L.marker([cLat, cLng], { icon: citizenIcon }).addTo(map)
+            .bindPopup('<b>Asegurado</b>');
+
+          // Polyline de ruta
+          const latlngs = [[dLat, dLng], [cLat, cLng]];
+          polylineRef.current = L.polyline(latlngs, { color: '#fbbf24', weight: 4, dashArray: '5, 10' }).addTo(map);
+
+          const bounds = L.latLngBounds(latlngs);
+          if (bounds.isValid()) {
+            map.fitBounds(bounds, { padding: [40, 40] });
+          }
+        } else {
+          // Update existing markers and polyline
+          const map = mapInstanceRef.current;
+          
+          if (driverMarkerRef.current) {
+            driverMarkerRef.current.setLatLng([dLat, dLng]);
+          }
+          if (citizenMarkerRef.current) {
+            citizenMarkerRef.current.setLatLng([cLat, cLng]);
+          }
+          if (polylineRef.current) {
+            polylineRef.current.setLatLngs([[dLat, dLng], [cLat, cLng]]);
+          }
+
+          // Safety bounds checking
+          const latlngs = [[dLat, dLng], [cLat, cLng]];
+          const bounds = L.latLngBounds(latlngs);
+          if (map && bounds.isValid()) {
+            map.fitBounds(bounds, { padding: [40, 40] });
+          }
+        }
       } catch (err) {
-        console.error("Error cargando mapa Leaflet:", err);
+        console.error("Leaflet safety capture error:", err);
       }
     };
 
@@ -261,16 +287,45 @@ function RoadsideMap({ driverLat, driverLng, citizenLat, citizenLng }: { driverL
       document.head.appendChild(script);
     }
 
-    initLeaflet();
+    // Call initializer
+    // @ts-ignore
+    if (window.L) {
+      initOrUpdateLeaflet();
+    } else {
+      const interval = setInterval(() => {
+        // @ts-ignore
+        if (window.L && active) {
+          clearInterval(interval);
+          initOrUpdateLeaflet();
+        }
+      }, 100);
+      return () => {
+        active = false;
+        clearInterval(interval);
+      };
+    }
 
     return () => {
       active = false;
-      if (leafletMapInstanceRef.current) {
-        leafletMapInstanceRef.current.remove();
-        leafletMapInstanceRef.current = null;
-      }
     };
   }, [driverLat, driverLng, citizenLat, citizenLng]);
+
+  // Clean-up on unmount
+  useEffect(() => {
+    return () => {
+      if (mapInstanceRef.current) {
+        try {
+          mapInstanceRef.current.remove();
+        } catch (e) {
+          console.warn("Error removing map instance:", e);
+        }
+        mapInstanceRef.current = null;
+        driverMarkerRef.current = null;
+        citizenMarkerRef.current = null;
+        polylineRef.current = null;
+      }
+    };
+  }, []);
 
   return (
     <div className="w-full h-full relative rounded-2xl overflow-hidden border border-slate-800 bg-slate-950">
@@ -693,36 +748,101 @@ export default function App() {
 
   const loadProfileFromDb = async (userId: string, email: string) => {
     try {
-      // Precise Role Reading: Fetching user data matching either auth_id or id safely
+      // 1. Obtén el usuario autenticado (auth.getUser())
+      const { data: { user: authUser } } = await supabase.auth.getUser();
+      const resolvedUserId = authUser?.id || userId;
+      const resolvedEmail = authUser?.email || email;
+
+      if (!resolvedUserId) return;
+
+      // 2. PRIMERA VERIFICACIÓN (Grúas / Driver)
+      const { data: grueroData } = await supabase
+        .from('grueros')
+        .select('*')
+        .eq('auth_id', resolvedUserId)
+        .maybeSingle();
+
+      if (grueroData) {
+        setDriverProfile({
+          name: grueroData.nombre_completo,
+          email: resolvedEmail,
+          phone: grueroData.telefono || '',
+          city: 'Caracas',
+          vehiclePlate: grueroData.placa_vehiculo || 'A92B45X'
+        });
+
+        // Load gruero balance
+        const { data: sg } = await supabase
+          .from('saldos_grueros')
+          .select('balance')
+          .eq('user_id', resolvedUserId)
+          .maybeSingle();
+        if (sg) {
+          setDriverBalance(Number(sg.balance) || 0.00);
+        }
+
+        // Establece el rol/vista del panel en GRUERO y haz un return INMEDIATO
+        setActiveDevice('driver');
+        return;
+      }
+
+      // 3. SEGUNDA VERIFICACIÓN (Abogados / Lawyer)
+      const { data: abogadoData } = await supabase
+        .from('abogados')
+        .select('*')
+        .eq('auth_id', resolvedUserId)
+        .maybeSingle();
+
+      if (abogadoData) {
+        setLawyerProfile({
+          name: abogadoData.nombre_completo,
+          email: resolvedEmail,
+          phone: abogadoData.telefono || '',
+          city: 'Caracas',
+          licenseNumber: 'INPRE-98.421',
+          specialty: 'Derecho Constitucional & Penal'
+        });
+
+        // Cargar saldo real del abogado
+        const { data: sla } = await supabase
+          .from('saldos_abogados')
+          .select('saldo_acumulado')
+          .eq('abogado_id', resolvedUserId)
+          .maybeSingle();
+        if (sla) {
+          setTotalLawyerEarnings(Number(sla.saldo_acumulado) || 0.00);
+        } else {
+          setTotalLawyerEarnings(0.00);
+        }
+
+        // Establece el rol/vista en ABOGADO y haz un return INMEDIATO
+        setActiveDevice('lawyer');
+        return;
+      }
+
+      // 4. TERCERA VERIFICACIÓN (Ciudadanos y otros): Solo si las dos anteriores fallaron (fueron null)
       const { data: userData } = await supabase
         .from('usuarios')
         .select('*')
-        .or(`auth_id.eq.${userId},id.eq.${userId}`)
+        .or(`auth_id.eq.${resolvedUserId},id.eq.${resolvedUserId}`)
         .maybeSingle();
 
-      // Retrieve dynamic raw role supporting both 'rol' and 'role' fields
-      let rawRole = '';
       if (userData) {
-        rawRole = userData.rol || userData.role || '';
-      }
-      
-      // Secondary fallback lookup via session user metadata to ensure 100% reliability
-      if (!rawRole) {
-        const { data: sessionData } = await supabase.auth.getSession();
-        const userMeta = sessionData?.session?.user?.user_metadata;
-        if (userMeta) {
-          rawRole = userMeta.rol || userMeta.role || '';
+        let rawRole = userData.rol || userData.role || '';
+        if (!rawRole) {
+          const { data: sessionData } = await supabase.auth.getSession();
+          const userMeta = sessionData?.session?.user?.user_metadata;
+          if (userMeta) {
+            rawRole = userMeta.rol || userMeta.role || '';
+          }
         }
-      }
+        
+        const finalRole = getNormalizedRole(rawRole || 'citizen');
 
-      // Safeguard fallback: if completely unknown, default to citizen
-      const finalRole = getNormalizedRole(rawRole || 'citizen');
-
-      if (userData) {
         if (finalRole === 'citizen') {
           setCitizenProfile({
             name: userData.nombre_completo,
-            email: email,
+            email: resolvedEmail,
             phone: userData.contacto_emergencia_1_telefono || '',
             city: 'Caracas'
           });
@@ -739,56 +859,18 @@ export default function App() {
               tel2: userData.contacto_emergencia_2_telefono || '584126665544'
             });
           }
-        } else if (finalRole === 'lawyer') {
-          setLawyerProfile({
-            name: userData.nombre_completo,
-            email: email,
-            phone: userData.contacto_emergencia_1_telefono || '',
-            city: 'Caracas',
-            licenseNumber: 'INPRE-98.421',
-            specialty: 'Derecho Constitucional & Penal'
-          });
-          // Cargar saldo real del abogado
-          const { data: sla } = await supabase
-            .from('saldos_abogados')
-            .select('saldo_acumulado')
-            .eq('abogado_id', userId)
-            .maybeSingle();
-          if (sla) {
-            setTotalLawyerEarnings(Number(sla.saldo_acumulado) || 0.00);
-          } else {
-            setTotalLawyerEarnings(0.00);
-          }
-        } else if (finalRole === 'driver') {
-          setDriverProfile({
-            name: userData.nombre_completo,
-            email: email,
-            phone: userData.contacto_emergencia_1_telefono || '',
-            city: 'Caracas',
-            vehiclePlate: 'A92B45X'
-          });
-          // Load gruero balance
-          const { data: sg } = await supabase
-            .from('saldos_grueros')
-            .select('balance')
-            .eq('user_id', userId)
-            .maybeSingle();
-          if (sg) {
-            setDriverBalance(Number(sg.balance) || 0.00);
-          }
         } else if (finalRole === 'ambulance') {
           setAmbulanceProfile({
             name: userData.nombre_completo,
-            email: email,
+            email: resolvedEmail,
             phone: userData.contacto_emergencia_1_telefono || '',
             city: 'Caracas',
             vehiclePlate: 'AMB-402X'
           });
-          // Load ambulance balance
           const { data: sa } = await supabase
             .from('saldos_ambulancias')
             .select('balance')
-            .eq('user_id', userId)
+            .eq('user_id', resolvedUserId)
             .maybeSingle();
           if (sa) {
             setAmbulanceBalanceClean(Number(sa.balance) || 0.00);
@@ -796,41 +878,42 @@ export default function App() {
         } else if (finalRole === 'medic') {
           setMedicProfile({
             name: userData.nombre_completo,
-            email: email,
+            email: resolvedEmail,
             phone: userData.contacto_emergencia_1_telefono || '',
             city: 'Caracas',
             licenseNumber: 'MSAS-42.501',
             specialty: 'Medicina Crítica & Emergencias'
           });
-          // Load doctor balance
           const { data: sm } = await supabase
             .from('saldos_medicos')
             .select('balance')
-            .eq('user_id', userId)
+            .eq('user_id', resolvedUserId)
             .maybeSingle();
           if (sm) {
             setMedicBalanceClean(Number(sm.balance) || 0.00);
           }
         }
-      }
 
-      // Strict post-login redirection based on the exact mapped role state
-      setActiveDevice(finalRole);
+        setActiveDevice(finalRole);
 
-      // Fetch balance from 'saldos'
-      const { data: saldoData } = await supabase
-        .from('saldos')
-        .select('*')
-        .eq('usuario_id', userId)
-        .maybeSingle();
+        // Fetch balance from 'saldos'
+        const { data: saldoData } = await supabase
+          .from('saldos')
+          .select('*')
+          .eq('usuario_id', resolvedUserId)
+          .maybeSingle();
 
-      if (saldoData) {
-        setCitizenBalance(Number(saldoData.creditos_disponibles));
-        setActivePlan(saldoData.plan_activo as any);
-        setConsultsUsed(Number(saldoData.consultas_ia_usadas));
+        if (saldoData) {
+          setCitizenBalance(Number(saldoData.creditos_disponibles));
+          setActivePlan(saldoData.plan_activo as any);
+          setConsultsUsed(Number(saldoData.consultas_ia_usadas));
+        }
+      } else {
+        // Fallback for unauthorized / unmapped users
+        setActiveDevice('citizen');
       }
     } catch (e) {
-      console.error("Error loading profile from DB: ", e);
+      console.error("Error loading profile from DB sequentially: ", e);
     }
   };
 
@@ -925,28 +1008,29 @@ export default function App() {
 
     const channel = supabase
       .channel(`tow-${activeTowJob.id}`)
-      .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'emergencias_activas', filter: `id=eq.${activeTowJob.id}` }, async (payload) => {
+      .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'asistencias_viales', filter: `id=eq.${activeTowJob.id}` }, async (payload) => {
         const updated = payload.new;
-        if (updated.estado === 'dispatched' || updated.estado === 'activa') {
+        if (updated.estado === 'activa') {
           setTowState('dispatched');
-          if (updated.abogado_id) {
-            const { data: userData } = await supabase
-              .from('usuarios')
-              .select('nombre_completo, contacto_emergencia_1_telefono')
-              .eq('id', updated.abogado_id)
+          if (updated.gruero_id) {
+            const { data: grueroRow } = await supabase
+              .from('grueros')
+              .select('nombre_completo, telefono')
+              .eq('id', updated.gruero_id)
               .maybeSingle();
 
             setActiveTowJob(prev => prev ? {
               ...prev,
-              driverName: userData?.nombre_completo || 'Asignado',
-              driverPhone: userData?.contacto_emergencia_1_telefono || ''
+              status: 'en_route',
+              driverName: grueroRow?.nombre_completo || 'Asignado',
+              driverPhone: grueroRow?.telefono || ''
             } : null);
           }
-        } else if (updated.estado === 'completed' || updated.estado === 'resuelta') {
+        } else if (updated.estado === 'completado') {
           // Resolved successfully
           setTowState('idle');
           setActiveTowJob(null);
-          const rate = Number(updated.tarifa_aplicada) || 28.50;
+          const rate = Number(updated.costo_total) || 28.50;
           setCitizenBalance(b => Math.max(0, b - rate));
           showMaterialAlert('🚜 Traslado Concluido', `La unidad de grúa ha completado el traslado. Se debitaron $${rate.toFixed(2)} USD de tu saldo del seguro.`);
           channel.unsubscribe();
@@ -958,6 +1042,117 @@ export default function App() {
       supabase.removeChannel(channel);
     };
   }, [activeDevice, activeTowJob?.id]);
+
+  // Real-time listener to sync the road assist chat messages from 'mensajes_viales' table
+  useEffect(() => {
+    const assistId = activeTowJob?.id || activeVialAssist?.id;
+    if (!assistId) return;
+
+    // Fetch existing messages
+    const fetchExistingMessages = async () => {
+      try {
+        const { data: messages, error } = await supabase
+          .from('mensajes_viales')
+          .select('*')
+          .eq('asistencia_id', assistId)
+          .order('created_at', { ascending: true });
+
+        if (!error && messages) {
+          const formatted = messages.map(m => {
+            const timeStr = m.created_at ? new Date(m.created_at).toLocaleTimeString('es-VE', { hour: '2-digit', minute: '2-digit', hour12: false }) : '';
+            return {
+              sender: m.remitente as 'citizen' | 'driver',
+              text: m.mensaje || '',
+              time: timeStr
+            };
+          });
+          setTowMessages(formatted);
+        }
+      } catch (err) {
+        console.error("Error fetching mensajes_viales:", err);
+      }
+    };
+
+    fetchExistingMessages();
+
+    // Live subscription to 'mensajes_viales' table updates for this active assistance
+    const channel = supabase
+      .channel(`chat-vial-${assistId}`)
+      .on(
+        'postgres_changes',
+        { 
+          event: 'INSERT', 
+          schema: 'public', 
+          table: 'mensajes_viales', 
+          filter: `asistencia_id=eq.${assistId}` 
+        },
+        (payload) => {
+          const m = payload.new;
+          const timeStr = m.created_at ? new Date(m.created_at).toLocaleTimeString('es-VE', { hour: '2-digit', minute: '2-digit', hour12: false }) : new Date().toLocaleTimeString('es-VE', { hour: '2-digit', minute: '2-digit', hour12: false });
+          const newMsg = {
+            sender: m.remitente as 'citizen' | 'driver',
+            text: m.mensaje || '',
+            time: timeStr
+          };
+          setTowMessages(prev => {
+            if (prev.some(p => p.text === newMsg.text && p.sender === newMsg.sender && p.time === newMsg.time)) {
+              return prev;
+            }
+            return [...prev, newMsg];
+          });
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [activeTowJob?.id, activeVialAssist?.id]);
+
+  // Periodically track the crane's position from 'unidades_grua' table if dispatched
+  useEffect(() => {
+    if (towState !== 'dispatched' || !activeTowJob) return;
+
+    let active = true;
+
+    const fetchCraneLocation = async () => {
+      try {
+        const { data: assist } = await supabase
+          .from('asistencias_viales')
+          .select('gruero_id')
+          .eq('id', activeTowJob.id)
+          .maybeSingle();
+
+        const gId = assist?.gruero_id;
+        if (gId) {
+          const { data: unit } = await supabase
+            .from('unidades_grua')
+            .select('lat_actual, lng_actual')
+            .eq('gruero_id', gId)
+            .maybeSingle();
+
+          if (unit && active) {
+            setCraneUnitState({
+              lat_actual: Number(unit.lat_actual) || 10.4900,
+              lng_actual: Number(unit.lng_actual) || -66.9100
+            });
+          }
+        }
+      } catch (err) {
+        console.error("Error updating crane location:", err);
+      }
+    };
+
+    fetchCraneLocation();
+    const interval = setInterval(() => {
+      if (active) fetchCraneLocation();
+    }, 5000);
+
+    return () => {
+      active = false;
+      clearInterval(interval);
+    };
+  }, [towState, activeTowJob?.id]);
 
   // Real-time listener for the citizen to sync the lawyer/SOS call status and chat messages from Supabase
   useEffect(() => {
@@ -2401,17 +2596,18 @@ export default function App() {
 
         const finalName = citizenProfile.name || 'Usuario SecureFlow';
         const finalPhone = citizenProfile.phone || '584241234567';
+        const chosenRole = selectRole;
+        const rolSeleccionado = chosenRole === 'driver' ? 'gruero' : dbRole;
 
         const signupMetadata = {
           nombre_completo: finalName,
           telefono: finalPhone,
-          role: dbRole,
+          role: rolSeleccionado,
           tipo_vehiculo: citizenVehicleType || 'coche',
           inpreabogado: impreAbogadoField || '',
           ciudad: citizenProfile.city || 'Caracas',
           cedula: ciudadanoIdField || '',
           especialidad: selectRole === 'lawyer' ? 'Defensa Penal' : (selectRole === 'medic' ? 'Triaje de Guardia' : ''),
-          // Supplementary fields to remain fully backwards/trigger compatible
           impre_bogado: impreAbogadoField || null,
           ciudadano_id: ciudadanoIdField || null,
           grua_id: gruaIdField || null,
@@ -2420,6 +2616,7 @@ export default function App() {
           selfie_url: selfieCaptured
         };
 
+        // PASO 1 (Autenticación pura)
         const { data: authData, error: authErr } = await supabase.auth.signUp({
           email: authEmail.trim(),
           password: authPassword.trim(),
@@ -2432,15 +2629,55 @@ export default function App() {
         
         if (authData?.user) {
           const uId = authData.user.id;
-          const chosenRole = selectRole;
 
-          // If NOT lawyer, upsert into 'usuarios' Table (Trigger covers 'citizen', but upsert/onConflict is completely safe)
-          if (chosenRole !== 'lawyer') {
-            const { error: dbErr } = await supabase.from('usuarios').upsert({
+          if (chosenRole === 'driver') {
+            // REGISTRO DIRECTO Y EXCLUSIVO DE GRUEROS (Sin insertar en 'usuarios')
+            const { error: grueroErr } = await supabase.from('grueros').insert([{
               id: uId,
               auth_id: uId,
-              rol: dbRole,
-              role: dbRole,
+              nombre_completo: finalName,
+              placa_vehiculo: gruaIdField || 'A92B45X',
+              telefono: finalPhone,
+              tarifa_base: 30.00,
+              precio_km: 2.50,
+              deuda_comisiones: 0
+            }]);
+
+            if (grueroErr) {
+              console.error("Error al registrar perfil técnico directo en grueros:", grueroErr);
+              throw grueroErr;
+            }
+
+            const { error: sldGruerErr } = await supabase.from('saldos_grueros').insert([{
+              user_id: uId,
+              balance: 0.00,
+              updated_at: new Date().toISOString()
+            }]);
+            if (sldGruerErr) {
+              console.warn('Non-blocking saldos_grueros insert info:', sldGruerErr);
+            }
+
+            setDriverProfile({
+              name: finalName,
+              email: authEmail.trim(),
+              phone: finalPhone,
+              city: citizenProfile.city || 'Caracas',
+              vehiclePlate: gruaIdField || 'A92B45X'
+            });
+            setDriverBalance(0.00);
+
+            // PASO 4 (Redirección con rol exacto para gruero)
+            showMaterialAlert('🛡️ Registro Exitoso', `Tu cuenta SecureFlow con rol de Chofer de Grúa ha sido creada correctamente con tu foto de selfie de seguridad homologada.`);
+            setSessionUser(authData.user);
+            setActiveDevice('driver');
+
+          } else {
+            // PARA TODOS LOS DEMÁS ROLES: PASO 2 (Identidad Base obligatoria)
+            const { error: dbErr } = await supabase.from('usuarios').insert([{
+              id: uId,
+              auth_id: uId,
+              rol: rolSeleccionado,
+              role: rolSeleccionado,
               nombre_completo: finalName,
               telefono: finalPhone,
               cedula: ciudadanoIdField || '',
@@ -2451,105 +2688,115 @@ export default function App() {
               contacto_emergencia_1_telefono: alertContacts.tel1 || '584249998877',
               contacto_emergencia_2_nombre: alertContacts.name2 || 'Mi Hermano',
               contacto_emergencia_2_telefono: alertContacts.tel2 || '584126665544'
-            });
+            }]);
 
             if (dbErr) {
-              console.warn('Non-blocking usuarios upsert info:', dbErr);
+              console.error("Error al registrar identidad base en usuarios:", dbErr);
+              throw dbErr;
             }
 
-            // Upsert into 'saldos' Table
-            const { error: sldErr } = await supabase.from('saldos').upsert({
+            // Initialize citizen/user balance
+            const { error: sldErr } = await supabase.from('saldos').insert([{
               usuario_id: uId,
               plan_activo: 'estandar',
               creditos_disponibles: 35.0,
               consultas_ia_usadas: 0
-            });
+            }]);
             if (sldErr) {
-              console.warn('Non-blocking saldos upsert info:', sldErr);
+              console.warn('Non-blocking saldos insert info:', sldErr);
+            }
+
+            // PASO 3 (Perfil Profesional Exclusivo y otros roles consecuentes)
+            if (chosenRole === 'lawyer') {
+              const { error: abgErr } = await supabase.from('abogados').insert([{
+                id: uId,
+                auth_id: uId,
+                nombre_completo: finalName,
+                telefono: finalPhone,
+                email: authEmail.trim(),
+                ciudad: citizenProfile.city || 'Caracas',
+                inpreabogado: impreAbogadoField || '',
+                especialidad: 'Defensa Penal'
+              }]);
+              if (abgErr) {
+                console.error("Error al registrar abogado:", abgErr);
+                throw abgErr;
+              }
+              
+              setLawyerProfile({
+                name: finalName,
+                email: authEmail.trim(),
+                phone: finalPhone,
+                city: citizenProfile.city || 'Caracas',
+                licenseNumber: impreAbogadoField,
+                specialty: 'Derecho Procesal & Penal'
+              });
+              setTotalLawyerEarnings(0.00);
+
+            } else if (chosenRole === 'citizen') {
+              setCitizenProfile({
+                name: finalName,
+                email: authEmail.trim(),
+                phone: finalPhone,
+                city: citizenProfile.city || 'Caracas'
+              });
+
+            } else if (chosenRole === 'ambulance') {
+              const { error: sldAmbErr } = await supabase.from('saldos_ambulancias').insert([{
+                user_id: uId,
+                balance: 0.00,
+                updated_at: new Date().toISOString()
+              }]);
+              if (sldAmbErr) {
+                console.warn('Non-blocking saldos_ambulancias insert info:', sldAmbErr);
+              }
+
+              setAmbulanceProfile({
+                name: finalName,
+                email: authEmail.trim(),
+                phone: finalPhone,
+                city: citizenProfile.city || 'Caracas',
+                vehiclePlate: credentialAmbulanceField || 'AMB-402X'
+              });
+
+            } else if (chosenRole === 'medic') {
+              const { error: sldMedErr } = await supabase.from('saldos_medicos').insert([{
+                user_id: uId,
+                balance: 0.00,
+                updated_at: new Date().toISOString()
+              }]);
+              if (sldMedErr) {
+                console.warn('Non-blocking saldos_medicos insert info:', sldMedErr);
+              }
+
+              setMedicProfile({
+                name: finalName,
+                email: authEmail.trim(),
+                phone: finalPhone,
+                city: citizenProfile.city || 'Caracas',
+                licenseNumber: credentialMedicField || 'MSAS-42.501'
+              });
+            }
+
+            // PASO 4 (Redirección con rol exacto para otros roles)
+            showMaterialAlert('🛡️ Registro Exitoso', `Tu cuenta SecureFlow con rol de ${chosenRole} ha sido creada correctamente con tu foto de selfie de seguridad homologada.`);
+            setSessionUser(authData.user);
+            setActiveDevice(chosenRole as any);
+
+            if (chosenRole === 'citizen') {
+              const { data: saldoData } = await supabase
+                .from('saldos')
+                .select('*')
+                .eq('usuario_id', uId)
+                .maybeSingle();
+
+              if (saldoData) {
+                setCitizenBalance(Number(saldoData.creditos_disponibles));
+                setActivePlan(saldoData.plan_activo as any);
+                setConsultsUsed(Number(saldoData.consultas_ia_usadas));
+              }
             }
           }
-
-          // Initialize professional balances to avoid empty rows
-          if (chosenRole === 'driver') {
-            await supabase.from('saldos_grueros').upsert({
-              user_id: uId,
-              balance: 0.00,
-              updated_at: new Date().toISOString()
-            }, { onConflict: 'user_id' });
-          } else if (chosenRole === 'ambulance') {
-            await supabase.from('saldos_ambulancias').upsert({
-              user_id: uId,
-              balance: 0.00,
-              updated_at: new Date().toISOString()
-            }, { onConflict: 'user_id' });
-          } else if (chosenRole === 'medic') {
-            await supabase.from('saldos_medicos').upsert({
-              user_id: uId,
-              balance: 0.00,
-              updated_at: new Date().toISOString()
-            }, { onConflict: 'user_id' });
-          }
-
-          // Create complementary tables matching schemas
-          if (chosenRole === 'lawyer') {
-            // Upsert into abogados table to complement trigger registration gracefully
-            const { error: abgErr } = await supabase.from('abogados').upsert({
-              id: uId,
-              auth_id: uId,
-              nombre_completo: finalName,
-              telefono: finalPhone,
-              email: authEmail.trim(),
-              ciudad: citizenProfile.city || 'Caracas',
-              inpreabogado: impreAbogadoField || '',
-              especialidad: 'Defensa Penal'
-            });
-            if (abgErr) {
-              console.warn('Non-blocking abogados upsert info:', abgErr);
-            }
-            
-            setLawyerProfile(prev => ({
-              ...prev,
-              name: finalName,
-              licenseNumber: impreAbogadoField,
-              specialty: 'Derecho Procesal & Penal'
-            }));
-          } else if (chosenRole === 'driver') {
-            await supabase.from('grueros').upsert({
-              id: uId,
-              auth_id: uId,
-              nombre_completo: finalName,
-              placa_vehiculo: gruaIdField || 'A92B45X',
-              telefono: finalPhone,
-              deuda_comisiones: 0
-            });
-            setDriverProfile(prev => ({
-              ...prev,
-              name: finalName,
-              vehiclePlate: gruaIdField
-            }));
-          } else if (chosenRole === 'citizen') {
-            setCitizenProfile(prev => ({
-              ...prev,
-              name: finalName,
-              phone: finalPhone
-            }));
-          } else if (chosenRole === 'ambulance') {
-            setAmbulanceProfile(prev => ({
-              ...prev,
-              name: finalName,
-              vehiclePlate: credentialAmbulanceField || 'AMB-402X'
-            }));
-          } else if (chosenRole === 'medic') {
-            setMedicProfile(prev => ({
-              ...prev,
-              name: finalName,
-              licenseNumber: credentialMedicField || 'MSAS-42.501'
-            }));
-          }
-
-          showMaterialAlert('🛡️ Registro Exitoso', `Tu cuenta SecureFlow con rol de ${chosenRole} ha sido creada correctamente con tu foto de selfie de seguridad homologada.`);
-          setSessionUser(authData.user);
-          setActiveDevice(chosenRole as any);
         }
       } catch (err: any) {
         console.error(err);
@@ -2594,114 +2841,217 @@ export default function App() {
     }
   };
 
+  // Haversine formula to compute geodesic distance between two points in km
+  const getHaversineDistance = (lat1: number, lon1: number, lat2: number, lon2: number): number => {
+    const R = 6371; // earth radius in km
+    const dLat = (lat2 - lat1) * Math.PI / 180;
+    const dLon = (lon2 - lon1) * Math.PI / 180;
+    const a = 
+      Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+      Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) * 
+      Math.sin(dLon / 2) * Math.sin(dLon / 2);
+    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+    return R * c;
+  };
+
   // Real synchronized Requesting of visual roadside assistance towing (Insurtech Dispatcher)
   const handleTowRequest = async () => {
     setIsAuthLoading(true);
     let assignedGrueroId = null;
     let baseFee = citizenVehicleType === 'coche' ? 20.00 : 12.00;
     let kmRate = citizenVehicleType === 'coche' ? 3.50 : 2.00;
+    let distanceInKm = 5.4; // default / fallback distance
 
     try {
-      const { data: qGruero } = await supabase
-        .from('grueros')
-        .select('*')
-        .eq('disponible', true)
-        .limit(1)
-        .maybeSingle();
+      // Fetch available crane units with joining of grueros details
+      const { data: unitsData, error: fetchErr } = await supabase
+        .from('unidades_grua')
+        .select(`
+          id,
+          gruero_id,
+          estado,
+          lat_actual,
+          lng_actual,
+          grueros (
+            id,
+            tarifa_base,
+            precio_km,
+            nombre_completo,
+            telefono
+          )
+        `)
+        .eq('estado', 'disponible');
 
-      if (qGruero) {
-        assignedGrueroId = qGruero.id;
-        baseFee = Number(qGruero.tarifa_base) || baseFee;
-        kmRate = Number(qGruero.precio_km) || kmRate;
+      if (fetchErr) {
+        console.warn("Could not fetch available units, error:", fetchErr);
+      }
+
+      let units = unitsData || [];
+
+      // Fallback: If no crane units are found as "disponible", try any "conectado" state units
+      if (units.length === 0) {
+        const { data: connectedUnits } = await supabase
+          .from('unidades_grua')
+          .select(`
+            id,
+            gruero_id,
+            estado,
+            lat_actual,
+            lng_actual,
+            grueros (
+              id,
+              tarifa_base,
+              precio_km,
+              nombre_completo,
+              telefono
+            )
+          `)
+          .eq('estado', 'conectado');
+        if (connectedUnits && connectedUnits.length > 0) {
+          units = connectedUnits;
+        }
+      }
+
+      // Fallback 2: Try fetching any crane units regardless of status
+      if (units.length === 0) {
+        const { data: allUnits } = await supabase
+          .from('unidades_grua')
+          .select(`
+            id,
+            gruero_id,
+            estado,
+            lat_actual,
+            lng_actual,
+            grueros (
+              id,
+              tarifa_base,
+              precio_km,
+              nombre_completo,
+              telefono
+            )
+          `);
+        if (allUnits && allUnits.length > 0) {
+          units = allUnits;
+        }
+      }
+
+      let closestDistance = 999999;
+      let selectedUnit = null;
+
+      if (units && units.length > 0) {
+        for (const unit of units) {
+          const lat = Number(unit.lat_actual);
+          const lng = Number(unit.lng_actual);
+          if (!isNaN(lat) && !isNaN(lng)) {
+            const dist = getHaversineDistance(citizenCoords.lat, citizenCoords.lng, lat, lng);
+            if (dist < closestDistance) {
+              closestDistance = dist;
+              selectedUnit = unit;
+            }
+          }
+        }
+      }
+
+      if (selectedUnit) {
+        assignedGrueroId = selectedUnit.gruero_id;
+        distanceInKm = closestDistance;
+        
+        // Update local crane unit track state
+        setCraneUnitState({
+          lat_actual: Number(selectedUnit.lat_actual) || 10.4900,
+          lng_actual: Number(selectedUnit.lng_actual) || -66.9100
+        });
+
+        const grueroObj: any = selectedUnit.grueros;
+        if (grueroObj) {
+          baseFee = Number(grueroObj.tarifa_base) || baseFee;
+          kmRate = Number(grueroObj.precio_km) || kmRate;
+        }
+      } else {
+        // If still no unit, select any registered gruero from the db
+        const { data: fallbackGruero } = await supabase
+          .from('grueros')
+          .select('*')
+          .limit(1)
+          .maybeSingle();
+
+        if (fallbackGruero) {
+          assignedGrueroId = fallbackGruero.id;
+          baseFee = Number(fallbackGruero.tarifa_base) || baseFee;
+          kmRate = Number(fallbackGruero.precio_km) || kmRate;
+        }
       }
     } catch (err) {
-      console.error("Error fetching assigned gruero:", err);
+      console.error("Error fetching assigned gruero and units:", err);
     } finally {
       setIsAuthLoading(false);
     }
 
-    const destCoords = getCoordsFromText(towDestinationText);
-    const distanceInKm = calculateDistanceInKm(citizenCoords.lat, citizenCoords.lng, destCoords.lat, destCoords.lng);
     const distMeters = Math.round(distanceInKm * 1000);
+    let costoTotal = baseFee + distanceInKm * kmRate;
+    if (costoTotal < baseFee) {
+      costoTotal = baseFee;
+    }
 
-    const estimatedPrice = baseFee + distanceInKm * kmRate;
-    const driverReceives = estimatedPrice * 0.80;
-    const platformFee = estimatedPrice * 0.20;
-
-    showMaterialConfirm(
-      '🚜 Solicitar Unidad de Grúa Oficial',
-      `Hemos ubicado la grúa oficial disponible para tu zona.\n\n` +
-      `• Origen: Caracas Central\n` +
-      `• Destino: ${towDestinationText}\n` +
-      `• Distancia Calculada: ${distanceInKm.toFixed(2)} KM\n` +
-      `• Perfil Vehículo: ${citizenVehicleType === 'coche' ? '🚗 Automóvil / Coche' : '🏍️ Motocicleta / Moto'}\n` +
+    // Native window.confirm prompt
+    const userConfirmed = window.confirm(
+      `城乡/Secured GRÚA DETECTADA 🚜\n` +
+      `• Distancia: ${distanceInKm.toFixed(1)} KM\n` +
       `• Tarifa Base: $${baseFee.toFixed(2)} USD\n` +
-      `• Precio por Km: $${kmRate.toFixed(2)} USD\n\n` +
-      `Detalle Financiero Transparente:\n` +
-      `• Total debitado a tu saldo: $${estimatedPrice.toFixed(2)} USD\n` +
-      `• Acreditado neto al chofer: $${driverReceives.toFixed(2)} USD (80%)\n` +
-      `• Comisión SecureFlow: $${platformFee.toFixed(2)} USD (20%)\n\n` +
-      `¿Deseas confirmar el despacho del servicio y abrir el chat de asistencia?`,
-      async () => {
-        const emerId = generateUUIDv4();
-        
-        const newJob: TowJob = {
-          id: emerId,
-          citizenName: citizenProfile.name || 'Ciudadano',
-          citizenPhone: citizenProfile.phone || 'No phone',
-          status: 'pending',
-          latitude: citizenCoords.lat,
-          longitude: citizenCoords.lng,
-          price: estimatedPrice,
-          distance: distMeters
-        };
-
-        setTowState('proposed');
-        setActiveTowJob(newJob);
-        setTowMessages([]);
-        setTowDailyCoUrl("https://meet.jit.si/SecureFlow-Tow-" + emerId);
-
-        try {
-          // Double Insert: To emergencias_activas (for compatibility) and to asistencias_viales
-          const vialInsertVal = {
-            id: emerId,
-            ciudadano_id: sessionUser?.id || null,
-            gruero_id: assignedGrueroId,
-            ubicacion_origen_lat: citizenCoords.lat,
-            ubicacion_origen_lng: citizenCoords.lng,
-            ubicacion_destino_texto: towDestinationText,
-            estado: 'pendiente',
-            costo_total: estimatedPrice,
-            sala_webrtc_url: "https://meet.jit.si/SecureFlow-Tow-" + emerId
-          };
-
-          const { data: insertedVialRow } = await supabase
-            .from('asistencias_viales')
-            .insert(vialInsertVal)
-            .select()
-            .maybeSingle();
-
-          if (insertedVialRow) {
-            setActiveVialAssist(insertedVialRow);
-          }
-
-          await supabase.from('emergencias_activas').insert({
-            id: emerId,
-            ciudadano_id: sessionUser?.id || null,
-            estado: 'pending',
-            ubicacion_texto: towDestinationText,
-            ubicacion_lat: citizenCoords.lat,
-            ubicacion_lng: citizenCoords.lng,
-            tarifa_aplicada: estimatedPrice,
-            sala_webrtc_url: "https://meet.jit.si/SecureFlow-Tow-" + emerId
-          });
-
-          triggerPush('🚜 Alerta Solicitud Grúa', 'Buscando unidad de grúa disponible en el sector...');
-        } catch (e) {
-          console.error("Error creating pending tow row in Supabase:", e);
-        }
-      }
+      `• Costo total calculado: $${costoTotal.toFixed(2)} USD\n\n` +
+      `¿Aceptar y solicitar?`
     );
+
+    if (!userConfirmed) {
+      return;
+    }
+
+    const emerId = generateUUIDv4();
+    
+    const newJob: TowJob = {
+      id: emerId,
+      citizenName: citizenProfile.name || 'Ciudadano',
+      citizenPhone: citizenProfile.phone || 'No phone',
+      status: 'pending',
+      latitude: citizenCoords.lat,
+      longitude: citizenCoords.lng,
+      price: costoTotal,
+      distance: distMeters
+    };
+
+    setTowState('proposed');
+    setActiveTowJob(newJob);
+    setTowMessages([]);
+    setTowDailyCoUrl("https://iframe.daily.co/secureflow-tow-" + emerId);
+
+    try {
+      // Insertion EXCLUSIVELY into asistencias_viales table
+      const vialInsertVal = {
+        id: emerId,
+        ciudadano_id: sessionUser?.id || null,
+        gruero_id: assignedGrueroId,
+        ubicacion_origen_lat: citizenCoords.lat,
+        ubicacion_origen_lng: citizenCoords.lng,
+        ubicacion_destino_texto: towDestinationText,
+        estado: 'pendiente',
+        costo_total: costoTotal,
+        sala_webrtc_url: "https://iframe.daily.co/secureflow-tow-" + emerId
+      };
+
+      const { data: insertedVialRow } = await supabase
+        .from('asistencias_viales')
+        .insert(vialInsertVal)
+        .select()
+        .maybeSingle();
+
+      if (insertedVialRow) {
+        setActiveVialAssist(insertedVialRow);
+      }
+
+      triggerPush('🚜 Alerta Solicitud Grúa', 'Buscando unidad de grúa disponible en el sector...');
+    } catch (e) {
+      console.error("Error creating pending tow row in Supabase asistencias_viales:", e);
+    }
   };
 
   // Lawyer accepts the SOS citizen
@@ -2969,17 +3319,6 @@ export default function App() {
         }
       }
 
-      // Update Supabase to dispatched and set driver (abogado_id)
-      const { error } = await supabase
-        .from('emergencias_activas')
-        .update({
-          estado: 'activa',
-          abogado_id: sessionUser?.id || null
-        })
-        .eq('id', activeTowJob.id);
-
-      if (error) throw error;
-
       setActiveTowJob({
         ...activeTowJob,
         status: 'en_route',
@@ -2988,25 +3327,19 @@ export default function App() {
       });
       setTowState('dispatched');
 
-      // Prepend or add first driver message with logged-in driver's actual registered name
-      const timeStr = new Date().toLocaleTimeString('es-VE', { hour: '2-digit', minute: '2-digit', hour12: false });
-      const initialDriverMsg = { 
-        sender: 'driver' as const, 
-        text: `🚨 Hola, soy el operador de grúa ${driverProfile.name || 'Asignado'}. Ya voy en ruta hacia tu localización en tiempo real con mi remolque. Puedes escribirme por aquí.`, 
-        time: timeStr 
-      };
+      // Prepend or add first driver message with logged-in driver's actual registered name via DB Insert
+      const initialDriverMsgText = `🚨 Hola, soy el operador de grúa ${driverProfile.name || 'Asignado'}. Ya voy en ruta hacia tu localización en tiempo real con mi remolque. Puedes escribirme por aquí.`;
       
-      setTowMessages([initialDriverMsg]);
-
-      // Broadcast welcome message in real-time
       try {
-        await supabase.channel(`room-tow-${activeTowJob.id}`).send({
-          type: 'broadcast',
-          event: 'shout',
-          payload: { msg: initialDriverMsg }
-        });
+        await supabase
+          .from('mensajes_viales')
+          .insert({
+            asistencia_id: activeTowJob.id,
+            remitente: 'driver',
+            mensaje: initialDriverMsgText
+          });
       } catch (e) {
-        console.error(e);
+        console.error("Error inserting initial driver message in mensajes_viales:", e);
       }
 
       triggerPush('🚜 Despacho Vial Aceptado', 'El operador ha iniciado tránsito hacia las coordenadas de tu GPS.');
@@ -3015,16 +3348,13 @@ export default function App() {
     }
   };
 
-  // Driver/citizen sends chat (synchronized in DB)
+  // Driver/citizen sends chat (synchronized in DB 'mensajes_viales' table)
   const handleSendTowMessage = async (senderRole: 'driver' | 'citizen') => {
     const text = senderRole === 'driver' ? driverChatInput.trim() : towChatInput.trim();
     if (!text) return;
 
-    const currentJob = activeTowJob;
+    const currentJob = activeTowJob || activeVialAssist;
     if (!currentJob) return;
-
-    const timeStr = new Date().toLocaleTimeString('es-VE', { hour: '2-digit', minute: '2-digit', hour12: false });
-    const newMsg: Message = { sender: senderRole, text, time: timeStr };
 
     // Clear the input right away for smooth typing feel
     if (senderRole === 'driver') {
@@ -3033,16 +3363,16 @@ export default function App() {
       setTowChatInput('');
     }
 
-    setTowMessages(prev => [...prev, newMsg]);
-
     try {
-      await supabase.channel(`room-tow-${currentJob.id}`).send({
-        type: 'broadcast',
-        event: 'shout',
-        payload: { msg: newMsg }
-      });
+      await supabase
+        .from('mensajes_viales')
+        .insert({
+          asistencia_id: currentJob.id,
+          remitente: senderRole,
+          mensaje: text
+        });
     } catch (e) {
-      console.error("Error sending synchronized tow chat message:", e);
+      console.error("Error sending synchronized tow chat message to DB:", e);
     }
   };
 
@@ -3200,14 +3530,14 @@ export default function App() {
     if (!activeTowJob) return;
 
     try {
-      // 1. Fetch emergency details from emergencias_activas to get the real citizen_id
-      const { data: emer } = await supabase
-        .from('emergencias_activas')
+      // 1. Fetch assistance details from asistencias_viales to get the real citizen_id
+      const { data: assist } = await supabase
+        .from('asistencias_viales')
         .select('*')
         .eq('id', activeTowJob.id)
         .maybeSingle();
 
-      const citizenId = emer?.ciudadano_id;
+      const citizenId = assist?.ciudadano_id;
       if (!citizenId) {
         showMaterialAlert('⚠️ Error de Transacción', 'No se ha encontrado el identificador del ciudadano asociado a este servicio.');
         return;
@@ -3242,13 +3572,6 @@ export default function App() {
         async () => {
           try {
             setIsAuthLoading(true);
-
-            // A. Update emergency state in DB
-            const { error: towUpdateErr } = await supabase
-              .from('emergencias_activas')
-              .update({ estado: 'finalizada' })
-              .eq('id', activeTowJob.id);
-            if (towUpdateErr) throw towUpdateErr;
 
             // Update asistencias_viales table state in DB
             await supabase
@@ -4079,14 +4402,22 @@ export default function App() {
                             </div>
 
                             {/* Live road tracking map */}
-                            <div className="h-48 rounded-xl border border-indigo-500/20 overflow-hidden relative">
-                              <RoadsideMap
-                                driverLat={craneUnitState?.lat_actual || 10.4900}
-                                driverLng={craneUnitState?.lng_actual || -66.9100}
-                                citizenLat={activeTowJob.latitude || citizenCoords.lat}
-                                citizenLng={activeTowJob.longitude || citizenCoords.lng}
-                              />
-                            </div>
+                            {towState === 'dispatched' && craneUnitState?.lat_actual && craneUnitState?.lng_actual && (activeTowJob?.latitude || citizenCoords.lat) && (activeTowJob?.longitude || citizenCoords.lng) ? (
+                              <div className="h-48 rounded-xl border border-indigo-500/20 overflow-hidden relative">
+                                <RoadsideMap
+                                  driverLat={craneUnitState.lat_actual}
+                                  driverLng={craneUnitState.lng_actual}
+                                  citizenLat={activeTowJob?.latitude || citizenCoords.lat}
+                                  citizenLng={activeTowJob?.longitude || citizenCoords.lng}
+                                />
+                              </div>
+                            ) : (
+                              <div className="h-48 rounded-xl border border-slate-800/40 bg-slate-950 flex flex-col justify-center items-center p-3 text-center space-y-1">
+                                <span className="text-lg animate-spin text-indigo-400">📡</span>
+                                <span className="text-[10px] text-slate-400 font-bold uppercase tracking-wide">Esperando Señal GPS de la Grúa...</span>
+                                <p className="text-[9px] text-slate-500">El mapa satelital se activará apenas el conductor acepte el despacho vial.</p>
+                              </div>
+                            )}
 
                             <button 
                               onClick={() => {
@@ -5443,14 +5774,22 @@ export default function App() {
                                 </div>
 
                                 {/* Street map tracking active real Leaflet component */}
-                                <div className="h-56 rounded-2xl border border-slate-800 overflow-hidden relative shadow-lg">
-                                  <RoadsideMap
-                                    driverLat={craneUnitState?.lat_actual || 10.4900}
-                                    driverLng={craneUnitState?.lng_actual || -66.9100}
-                                    citizenLat={activeTowJob.latitude || 10.4984}
-                                    citizenLng={activeTowJob.longitude || -66.8824}
-                                  />
-                                </div>
+                                {towState === 'dispatched' && craneUnitState?.lat_actual && craneUnitState?.lng_actual && (activeTowJob?.latitude || 10.4984) && (activeTowJob?.longitude || -66.8824) ? (
+                                  <div className="h-56 rounded-2xl border border-slate-800 overflow-hidden relative shadow-lg">
+                                    <RoadsideMap
+                                      driverLat={craneUnitState.lat_actual}
+                                      driverLng={craneUnitState.lng_actual}
+                                      citizenLat={activeTowJob?.latitude || 10.4984}
+                                      citizenLng={activeTowJob?.longitude || -66.8824}
+                                    />
+                                  </div>
+                                ) : (
+                                  <div className="h-56 rounded-2xl border border-slate-800/20 bg-slate-950 flex flex-col justify-center items-center p-3 text-center space-y-1">
+                                    <span className="text-lg animate-spin text-indigo-400">📡</span>
+                                    <span className="text-[10px] text-slate-400 font-bold uppercase tracking-wide">Iniciando Señal GPS de Navegación...</span>
+                                    <p className="text-[9px] text-slate-500">Buscando coordenadas del remolque y del asegurado.</p>
+                                  </div>
+                                )}
 
                                 {/* Active daily.co WebRTC Video control for driver sync */}
                                 <div className="bg-slate-950 p-2.5 rounded-2xl border border-slate-800/60 space-y-2.5">

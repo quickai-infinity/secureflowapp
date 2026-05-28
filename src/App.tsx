@@ -2632,7 +2632,7 @@ export default function App() {
 
           if (chosenRole === 'driver') {
             // REGISTRO DIRECTO Y EXCLUSIVO DE GRUEROS (Sin insertar en 'usuarios')
-            const { error: grueroErr } = await supabase.from('grueros').insert([{
+            const { error: grueroErr } = await supabase.from('grueros').upsert([{
               id: uId,
               auth_id: uId,
               nombre_completo: finalName,

@@ -1008,15 +1008,30 @@ export default function App() {
     };
   }, [activeDevice, sessionUser?.id]);
 
-  // Real-time listener for the citizen to sync the crane request status and chat messages from Supabase
+  // Real-time listener and fallback query for the citizen to sync the crane request status from Supabase
   useEffect(() => {
     if (activeDevice !== 'citizen' || !activeTowJob) return;
 
-    const channel = supabase
-      .channel(`tow-${activeTowJob.id}`)
-      .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'asistencias_viales', filter: `id=eq.${activeTowJob.id}` }, async (payload) => {
-        const updated = payload.new;
-        if (updated.estado === 'activa') {
+    let active = true;
+
+    const checkTowStatusUpdate = async (updatedObj?: any) => {
+      try {
+        let updated = updatedObj;
+        if (!updated) {
+          const { data, error } = await supabase
+            .from('asistencias_viales')
+            .select('*')
+            .eq('id', activeTowJob.id)
+            .maybeSingle();
+
+          if (!error && data) {
+            updated = data;
+          }
+        }
+
+        if (!updated) return;
+
+        if (updated.estado === 'activa' || updated.estado === 'aceptado') {
           setTowState('dispatched');
           if (updated.gruero_id) {
             const { data: grueroRow } = await supabase
@@ -1025,26 +1040,53 @@ export default function App() {
               .eq('id', updated.gruero_id)
               .maybeSingle();
 
-            setActiveTowJob(prev => prev ? {
-              ...prev,
-              status: 'en_route',
-              driverName: grueroRow?.nombre_completo || 'Asignado',
-              driverPhone: grueroRow?.telefono || ''
-            } : null);
+            if (active) {
+              setActiveTowJob(prev => prev ? {
+                ...prev,
+                status: 'en_route',
+                driverName: grueroRow?.nombre_completo || 'Carlos Ruiz',
+                driverPhone: grueroRow?.telefono || 'No phone',
+                gruero_id: updated.gruero_id
+              } : null);
+            }
           }
         } else if (updated.estado === 'completado') {
-          // Resolved successfully
-          setTowState('idle');
-          setActiveTowJob(null);
-          const rate = Number(updated.costo_total) || 28.50;
-          setCitizenBalance(b => Math.max(0, b - rate));
-          showMaterialAlert('🚜 Traslado Concluido', `La unidad de grúa ha completado el traslado. Se debitaron $${rate.toFixed(2)} USD de tu saldo del seguro.`);
-          channel.unsubscribe();
+          if (active) {
+            setTowState('idle');
+            setActiveTowJob(null);
+            const rate = Number(updated.costo_total) || 28.50;
+            setCitizenBalance(b => Math.max(0, b - rate));
+            showMaterialAlert('🚜 Traslado Concluido', `La unidad de grúa ha completado el traslado. Se debitaron $${rate.toFixed(2)} USD de tu saldo del seguro.`);
+          }
+        }
+      } catch (err) {
+        console.error("Error checking tow status in citizen panel:", err);
+      }
+    };
+
+    // Run status check immediately
+    checkTowStatusUpdate();
+
+    // Setup Realtime subscription channel
+    const channel = supabase
+      .channel(`tow-${activeTowJob.id}`)
+      .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'asistencias_viales', filter: `id=eq.${activeTowJob.id}` }, async (payload) => {
+        if (active) {
+          checkTowStatusUpdate(payload.new);
         }
       })
       .subscribe();
 
+    // Constant fallback interval checking every 2 seconds to guarantee responsiveness
+    const interval = setInterval(() => {
+      if (active) {
+        checkTowStatusUpdate();
+      }
+    }, 2000);
+
     return () => {
+      active = false;
+      clearInterval(interval);
       supabase.removeChannel(channel);
     };
   }, [activeDevice, activeTowJob?.id]);
@@ -1115,11 +1157,12 @@ export default function App() {
     };
   }, [activeTowJob?.id, activeVialAssist?.id]);
 
-  // Periodically track the crane's position from 'unidades_grua' table if dispatched
+  // Subscribe to and periodically track the crane's position from 'unidades_grua' table if dispatched
   useEffect(() => {
     if (towState !== 'dispatched' || !activeTowJob) return;
 
     let active = true;
+    let channel: any = null;
 
     const fetchCraneLocation = async () => {
       try {
@@ -1143,6 +1186,30 @@ export default function App() {
               lng_actual: Number(unit.lng_actual) || -66.9100
             });
           }
+
+          // Subscribe dynamically to realtime changes for this gruero tracker coordinates
+          if (!channel && active) {
+            channel = supabase
+              .channel(`crane-location-${gId}`)
+              .on(
+                'postgres_changes',
+                {
+                  event: 'UPDATE',
+                  schema: 'public',
+                  table: 'unidades_grua',
+                  filter: `gruero_id=eq.${gId}`
+                },
+                (payload) => {
+                  if (active && payload.new) {
+                    setCraneUnitState({
+                      lat_actual: Number(payload.new.lat_actual) || 10.4900,
+                      lng_actual: Number(payload.new.lng_actual) || -66.9100
+                    });
+                  }
+                }
+              )
+              .subscribe();
+          }
         }
       } catch (err) {
         console.error("Error updating crane location:", err);
@@ -1150,15 +1217,96 @@ export default function App() {
     };
 
     fetchCraneLocation();
+    
+    // Fast polling fallback to ensure robust syncs
     const interval = setInterval(() => {
       if (active) fetchCraneLocation();
-    }, 5000);
+    }, 2500);
 
     return () => {
       active = false;
       clearInterval(interval);
+      if (channel) {
+        supabase.removeChannel(channel);
+      }
     };
   }, [towState, activeTowJob?.id]);
+
+  // Driver subscribes to and polls Citizen location from 'asistencias_viales' in real-time
+  useEffect(() => {
+    if (activeDevice !== 'driver' || towState !== 'dispatched' || !activeTowJob) return;
+
+    let active = true;
+    let channel: any = null;
+
+    const fetchCitizenLocation = async () => {
+      try {
+        const { data: assist, error } = await supabase
+          .from('asistencias_viales')
+          .select('ubicacion_origen_lat, ubicacion_origen_lng')
+          .eq('id', activeTowJob.id)
+          .maybeSingle();
+
+        if (error || !assist) return;
+
+        if (active) {
+          const lat = Number(assist.ubicacion_origen_lat);
+          const lng = Number(assist.ubicacion_origen_lng);
+          if (!isNaN(lat) && !isNaN(lng)) {
+            setActiveTowJob(prev => prev ? {
+              ...prev,
+              latitude: lat,
+              longitude: lng
+            } : null);
+          }
+        }
+      } catch (err) {
+        console.error("Error in driver fetching citizen coordinates:", err);
+      }
+    };
+
+    fetchCitizenLocation();
+
+    // Subscribe to UPDATE events on 'asistencias_viales' for the current job
+    channel = supabase
+      .channel(`driver-citizen-track-${activeTowJob.id}`)
+      .on(
+        'postgres_changes',
+        {
+          event: 'UPDATE',
+          schema: 'public',
+          table: 'asistencias_viales',
+          filter: `id=eq.${activeTowJob.id}`
+        },
+        (payload) => {
+          if (active && payload.new) {
+            const lat = Number(payload.new.ubicacion_origen_lat);
+            const lng = Number(payload.new.ubicacion_origen_lng);
+            if (!isNaN(lat) && !isNaN(lng)) {
+              setActiveTowJob(prev => prev ? {
+                ...prev,
+                latitude: lat,
+                longitude: lng
+              } : null);
+            }
+          }
+        }
+      )
+      .subscribe();
+
+    // Polling fallback helper every 2.5 seconds
+    const interval = setInterval(() => {
+      if (active) fetchCitizenLocation();
+    }, 2500);
+
+    return () => {
+      active = false;
+      clearInterval(interval);
+      if (channel) {
+        supabase.removeChannel(channel);
+      }
+    };
+  }, [activeDevice, towState, activeTowJob?.id]);
 
   // Real-time listener for the citizen to sync the lawyer/SOS call status and chat messages from Supabase
   useEffect(() => {
@@ -1258,100 +1406,155 @@ export default function App() {
     };
   }, [activeDevice, activeAmbulanceJob?.id]);
 
-  // Real-time listener for tow truck drivers to receive crane requests and sync chat messages
+  // Real-time listener and synchronizer for Tow Truck Driver Panel using exclusive public.asistencias_viales
   useEffect(() => {
-    if (activeDevice !== 'driver') return;
+    if (activeDevice !== 'driver' || !sessionUser?.id) return;
 
-    const fetchCallingTows = async () => {
-      // 1. Fetch any active crane dispatches in Calling status
-      const { data: callingData } = await supabase
-        .from('emergencias_activas')
-        .select('*')
-        .eq('estado', 'buscando');
+    let active = true;
+    let channel: any = null;
 
-      const filteredTow = callingData?.filter(e => !e.sala_webrtc_url) || [];
-      if (filteredTow.length > 0) {
-        const active = filteredTow[0];
-        const { data: userData } = await supabase
-          .from('usuarios')
-          .select('nombre_completo, contacto_emergencia_1_telefono')
-          .eq('id', active.ciudadano_id)
+    const syncDriverTowState = async () => {
+      try {
+        // First resolve actual gruero_id of logged-in user
+        const { data: qGruero } = await supabase
+          .from('grueros')
+          .select('id')
+          .eq('auth_id', sessionUser.id)
           .maybeSingle();
 
-        const cName = userData?.nombre_completo || 'Ciudadano';
-        const cPhone = userData?.contacto_emergencia_1_telefono || '';
-        const distance = 3450;
-
-        if (towState === 'idle') {
-          setTowState('proposed');
-          setActiveTowJob({
-            id: active.id,
-            citizenName: cName,
-            citizenPhone: cPhone,
-            status: 'pending',
-            latitude: Number(active.ubicacion_lat),
-            longitude: Number(active.ubicacion_lng),
-            price: Number(active.tarifa_aplicada),
-            distance: distance
-          });
+        if (!active) return;
+        const grueroId = qGruero?.id;
+        if (!grueroId) {
+          console.warn("Operator profile not found yet.");
+          return;
         }
-        return;
-      }
 
-      // 2. Fetch our currently active ongoing tow job if we are logged in and already accepted it
-      if (sessionUser) {
-        const { data: activeList } = await supabase
-          .from('emergencias_activas')
+        // 1. First, check if we have an active ongoing tow job
+        const { data: activeList, error: activeErr } = await supabase
+          .from('asistencias_viales')
           .select('*')
           .eq('estado', 'activa')
-          .eq('abogado_id', sessionUser.id);
+          .eq('gruero_id', grueroId);
+
+        if (!active) return;
 
         if (activeList && activeList.length > 0) {
-          const active = activeList[0];
+          const assist = activeList[0];
           const { data: userData } = await supabase
             .from('usuarios')
             .select('nombre_completo, contacto_emergencia_1_telefono')
-            .eq('id', active.ciudadano_id)
+            .eq('id', assist.ciudadano_id)
             .maybeSingle();
 
-          const cName = userData?.nombre_completo || 'Ciudadano';
-          const cPhone = userData?.contacto_emergencia_1_telefono || '';
-          const distance = 3450;
+          if (!active) return;
+
+          const cName = userData?.nombre_completo || 'Asegurado';
+          const cPhone = userData?.contacto_emergencia_1_telefono || 'No phone';
 
           setTowState('dispatched');
           setActiveTowJob({
-            id: active.id,
+            id: assist.id,
             citizenName: cName,
             citizenPhone: cPhone,
             status: 'en_route',
-            latitude: Number(active.ubicacion_lat),
-            longitude: Number(active.ubicacion_lng),
-            price: Number(active.tarifa_aplicada),
-            distance: distance
+            latitude: Number(assist.ubicacion_origen_lat),
+            longitude: Number(assist.ubicacion_origen_lng),
+            price: Number(assist.costo_total),
+            distance: 4000
           });
+          setActiveVialAssist(assist);
+          return;
+        }
+
+        // 2. If no active job, check if there is any pending proposed request assigned or open
+        const { data: pendingList, error: pendingErr } = await supabase
+          .from('asistencias_viales')
+          .select('*')
+          .eq('estado', 'pendiente');
+
+        if (!active) return;
+
+        const myPending = pendingList?.filter(p => !p.gruero_id || p.gruero_id === grueroId) || [];
+
+        if (myPending.length > 0) {
+          const assist = myPending[0];
+          const { data: userData } = await supabase
+            .from('usuarios')
+            .select('nombre_completo, contacto_emergencia_1_telefono')
+            .eq('id', assist.ciudadano_id)
+            .maybeSingle();
+
+          if (!active) return;
+
+          const cName = userData?.nombre_completo || 'Asegurado';
+          const cPhone = userData?.contacto_emergencia_1_telefono || 'No phone';
+
+          // Coordenadas destino e inicio
+          const destCoords = getCoordsFromText(assist.ubicacion_destino_texto || 'Plaza Venezuela');
+          const calculatedKm = calculateDistanceInKm(
+            Number(assist.ubicacion_origen_lat),
+            Number(assist.ubicacion_origen_lng),
+            destCoords.lat,
+            destCoords.lng
+          );
+
+          setTowState('proposed');
+          setActiveTowJob({
+            id: assist.id,
+            citizenName: cName,
+            citizenPhone: cPhone,
+            status: 'pending',
+            latitude: Number(assist.ubicacion_origen_lat),
+            longitude: Number(assist.ubicacion_origen_lng),
+            price: Number(assist.costo_total),
+            distance: Math.round(calculatedKm * 1000)
+          });
+          setActiveVialAssist(assist);
         } else {
-          // No calling or active job
-          if (towState !== 'idle' && towState !== 'proposed' && !activeVialAssist) {
+          // No proposed or active job
+          if (towStateRef.current !== 'idle') {
             setTowState('idle');
             setActiveTowJob(null);
+            setActiveVialAssist(null);
           }
         }
+      } catch (err) {
+        console.error("Error syncing driver tow status:", err);
       }
     };
 
-    fetchCallingTows();
+    // Run synchronization immediately
+    syncDriverTowState();
 
-    const channel = supabase
-      .channel('driver-panel-sync')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'emergencias_activas' }, () => {
-        fetchCallingTows();
-      })
+    // Setup Supabase Real-Time subscription exclusively for public.asistencias_viales table
+    channel = supabase
+      .channel('driver-vial-assist-channel')
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'asistencias_viales' },
+        (payload) => {
+          if (active) {
+            syncDriverTowState();
+          }
+        }
+      )
       .subscribe();
 
+    // Robust fast-polling backup to guarantee instant state updates if WebSockets ever flicker
+    const interval = setInterval(() => {
+      if (active) {
+        syncDriverTowState();
+      }
+    }, 2000);
+
     return () => {
-      supabase.removeChannel(channel);
+      active = false;
+      clearInterval(interval);
+      if (channel) {
+        supabase.removeChannel(channel);
+      }
     };
-  }, [activeDevice, towState, sessionUser?.id]);
+  }, [activeDevice, sessionUser?.id]);
 
   // REAL GEOLOCATION WATCH: Tracks and updates Citizen position in real-time
   useEffect(() => {
@@ -1411,11 +1614,24 @@ export default function App() {
       setCraneUnitState({ lat_actual: lat, lng_actual: lng });
 
       try {
+        // Resolve the true grueros.id from public.grueros table where auth_id equals sessionUser.id
+        const { data: qGruero } = await supabase
+          .from('grueros')
+          .select('id')
+          .eq('auth_id', sessionUser.id)
+          .maybeSingle();
+
+        const actualGrueroId = qGruero?.id;
+        if (!actualGrueroId) {
+          console.warn("No registered gruero profile found for current driver auth user.");
+          return;
+        }
+
         // Query if crane unit exists
         const { data: craneUnit } = await supabase
           .from('unidades_grua')
           .select('*')
-          .eq('gruero_id', sessionUser.id)
+          .eq('gruero_id', actualGrueroId)
           .maybeSingle();
 
         if (craneUnit) {
@@ -1426,12 +1642,12 @@ export default function App() {
               lng_actual: lng,
               estado: 'en_ruta'
             })
-            .eq('gruero_id', sessionUser.id);
+            .eq('gruero_id', actualGrueroId);
         } else {
           await supabase
             .from('unidades_grua')
             .insert({
-              gruero_id: sessionUser.id,
+              gruero_id: actualGrueroId,
               lat_actual: lat,
               lng_actual: lng,
               estado: 'en_ruta'
@@ -1457,92 +1673,7 @@ export default function App() {
     };
   }, [activeDevice, sessionUser?.id]);
 
-  // EFECTO NUEVO Y AISLADO: Escucha exclusivamente inserts en 'asistencias_viales' con estado 'pendiente'
-  useEffect(() => {
-    if (activeDevice !== 'driver') return;
 
-    let localInterval: NodeJS.Timeout | null = null;
-
-    const fetchPendingVialAssistances = async () => {
-      try {
-        const { data: pendingVials, error } = await supabase
-          .from('asistencias_viales')
-          .select('*')
-          .eq('estado', 'pendiente');
-
-        if (!error && pendingVials && pendingVials.length > 0) {
-          const assist = pendingVials[0];
-          
-          // Obtener datos del ciudadano
-          const { data: userData } = await supabase
-            .from('usuarios')
-            .select('nombre_completo, contacto_emergencia_1_telefono')
-            .eq('id', assist.ciudadano_id)
-            .maybeSingle();
-
-          const cName = userData?.nombre_completo || 'Ciudadano';
-          const cPhone = userData?.contacto_emergencia_1_telefono || '';
-
-          // Coordenadas destino e inicio
-          const destCoords = getCoordsFromText(assist.ubicacion_destino_texto || 'Plaza Venezuela');
-          const calculatedKm = calculateDistanceInKm(
-            Number(assist.ubicacion_origen_lat),
-            Number(assist.ubicacion_origen_lng),
-            destCoords.lat,
-            destCoords.lng
-          );
-
-          if (towStateRef.current === 'idle') {
-            setTowState('proposed');
-            setActiveTowJob({
-              id: assist.id,
-              citizenName: cName,
-              citizenPhone: cPhone,
-              status: 'pending',
-              latitude: Number(assist.ubicacion_origen_lat),
-              longitude: Number(assist.ubicacion_origen_lng),
-              price: Number(assist.costo_total),
-              distance: Math.round(calculatedKm * 1000)
-            });
-            setActiveVialAssist(assist);
-          }
-        }
-      } catch (err) {
-        console.error("Error en fetchPendingVialAssistances:", err);
-      }
-    };
-
-    fetchPendingVialAssistances();
-
-    const channel = supabase
-      .channel('vial-assistance-inserts-isolated')
-      .on(
-        'postgres_changes',
-        { event: 'INSERT', schema: 'public', table: 'asistencias_viales' },
-        (payload) => {
-          if (payload.new && payload.new.estado === 'pendiente') {
-            fetchPendingVialAssistances();
-          }
-        }
-      )
-      .on(
-        'postgres_changes',
-        { event: 'UPDATE', schema: 'public', table: 'asistencias_viales' },
-        (payload) => {
-          if (payload.new && (payload.new.estado === 'pendiente' || payload.new.estado === 'activa')) {
-            fetchPendingVialAssistances();
-          }
-        }
-      )
-      .subscribe();
-
-    return () => {
-      supabase.removeChannel(channel);
-      if (localInterval) {
-        clearInterval(localInterval);
-      }
-    };
-  }, [activeDevice]);
 
   // Real-time synchronization for Ambulance Paramedic Panel
   useEffect(() => {
@@ -3606,22 +3737,33 @@ export default function App() {
 
     if (!activeTowJob) return;
 
-    try {
-      // Find current gruero row first
-      let grueroId = null;
-      try {
-        const { data: qGruero } = await supabase
-          .from('grueros')
-          .select('id')
-          .eq('auth_id', sessionUser?.id)
-          .maybeSingle();
-        if (qGruero) {
-          grueroId = qGruero.id;
-        }
-      } catch (err) {
-        console.error("Error querying gruero uuid:", err);
-      }
+    // TRANSICIÓN INMEDIATA COUPLING: Actualizar estados de React justo después de que la función se invoque
+    // para desmontar la tarjeta amarilla en el panel gruero y renderizar el mapa de seguimiento ipso facto.
+    const acceptedJobId = activeTowJob.id;
+    setActiveTowJob(prev => prev ? {
+      ...prev,
+      status: 'en_route',
+      driverName: driverProfile.name || 'Operador Asignado',
+      driverPhone: driverProfile.phone || 'No phone'
+    } : null);
+    setTowState('dispatched');
 
+    let grueroId = null;
+    try {
+      const { data: qGruero } = await supabase
+        .from('grueros')
+        .select('id')
+        .eq('auth_id', sessionUser?.id)
+        .maybeSingle();
+      if (qGruero) {
+        grueroId = qGruero.id;
+      }
+    } catch (err) {
+      console.error("Error querying gruero uuid:", err);
+    }
+
+    // Defensive DB Update in isolated try block so failures won't lock up UI transition
+    try {
       // Update asistencias_viales to 'activa'
       await supabase
         .from('asistencias_viales')
@@ -3629,10 +3771,14 @@ export default function App() {
           estado: 'activa',
           gruero_id: grueroId || null
         })
-        .eq('id', activeTowJob.id);
+        .eq('id', acceptedJobId);
+    } catch (err) {
+      console.error("Error updating asistencias_viales in DB:", err);
+    }
 
-      // Query or create units of this gruero
-      if (grueroId) {
+    // Query or create units of this gruero in isolated defensive block
+    if (grueroId) {
+      try {
         const { data: craneUnit } = await supabase
           .from('unidades_grua')
           .select('*')
@@ -3654,35 +3800,27 @@ export default function App() {
           await supabase.from('unidades_grua').insert(newUnit);
           setCraneUnitState({ lat_actual: 10.4900, lng_actual: -66.9100 });
         }
+      } catch (err) {
+        console.error("Error setting up units_grua row in DB:", err);
       }
-
-      setActiveTowJob({
-        ...activeTowJob,
-        status: 'en_route',
-        driverName: driverProfile.name || 'Operador Asignado',
-        driverPhone: driverProfile.phone || 'No phone'
-      });
-      setTowState('dispatched');
-
-      // Prepend or add first driver message with logged-in driver's actual registered name via DB Insert
-      const initialDriverMsgText = `🚨 Hola, soy el operador de grúa ${driverProfile.name || 'Asignado'}. Ya voy en ruta hacia tu localización en tiempo real con mi remolque. Puedes escribirme por aquí.`;
-      
-      try {
-        await supabase
-          .from('mensajes_viales')
-          .insert({
-            asistencia_id: activeTowJob.id,
-            remitente: 'driver',
-            mensaje: initialDriverMsgText
-          });
-      } catch (e) {
-        console.error("Error inserting initial driver message in mensajes_viales:", e);
-      }
-
-      triggerPush('🚜 Despacho Vial Aceptado', 'El operador ha iniciado tránsito hacia las coordenadas de tu GPS.');
-    } catch (e) {
-      console.error("Error accepting dispatch in DB:", e);
     }
+
+    // Prepend or add first driver message with logged-in driver's actual registered name via DB Insert
+    const initialDriverMsgText = `🚨 Hola, soy el operador de grúa ${driverProfile.name || 'Asignado'}. Ya voy en ruta hacia tu localización en tiempo real con mi remolque. Puedes escribirme por aquí.`;
+    
+    try {
+      await supabase
+        .from('mensajes_viales')
+        .insert({
+          asistencia_id: acceptedJobId,
+          remitente: 'driver',
+          mensaje: initialDriverMsgText
+        });
+    } catch (e) {
+      console.error("Error inserting initial driver message in mensajes_viales:", e);
+    }
+
+    triggerPush('🚜 Despacho Vial Aceptado', 'El operador ha iniciado tránsito hacia las coordenadas de tu GPS.');
   };
 
   // Driver/citizen sends chat (synchronized in DB 'mensajes_viales' table)

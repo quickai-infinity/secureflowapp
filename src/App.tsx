@@ -136,6 +136,9 @@ interface TowJob {
   longitude: number;
   price: number;
   distance: number;
+  driverName?: string;
+  driverPhone?: string;
+  gruero_id?: string;
 }
 
 // Support mapping both English and Spanish term variations to corresponding layouts
@@ -1057,6 +1060,88 @@ export default function App() {
     };
   }, [activeDevice, sessionUser?.id]);
 
+  // Effect to fetch and restore any active, pending, or en_progreso tow service for the citizen on mount or role swap
+  useEffect(() => {
+    if (activeDevice !== 'citizen' || !sessionUser?.id) return;
+
+    let active = true;
+
+    const restoreCitizenTowJob = async () => {
+      try {
+        const { data: activeList } = await supabase
+          .from('asistencias_viales')
+          .select('*')
+          .in('estado', ['pendiente', 'activa', 'en_progreso'])
+          .eq('ciudadano_id', sessionUser.id)
+          .order('created_at', { ascending: false });
+
+        if (!active) return;
+
+        if (activeList && activeList.length > 0) {
+          const assist = activeList[0];
+          
+          let dName = 'Carlos Ruiz';
+          let dPhone = 'No phone';
+          let gId = assist.gruero_id;
+          
+          if (gId) {
+            const { data: grueroRow } = await supabase
+              .from('grueros')
+              .select('nombre_completo, telefono')
+              .eq('id', gId)
+              .maybeSingle();
+            if (active && grueroRow) {
+              dName = grueroRow.nombre_completo;
+              dPhone = grueroRow.telefono;
+            }
+          }
+
+          const baseFee = tariffs.grua?.tarifa_base ?? 30.00;
+          const kmRate = tariffs.grua?.precio_por_km ?? 4.50;
+          
+          // Calculate distance matching what was saved
+          const distanceInKm = 5.4; // default
+          const distMeters = assist.distancia_metros || Math.round(distanceInKm * 1000);
+
+          const restoredJob: TowJob = {
+            id: assist.id,
+            citizenName: citizenProfile.name || 'Ciudadano',
+            citizenPhone: citizenProfile.phone || 'No phone',
+            status: assist.estado === 'pendiente' ? 'pending' : 'en_route',
+            latitude: Number(assist.ubicacion_origen_lat) || citizenCoords.lat,
+            longitude: Number(assist.ubicacion_origen_lng) || citizenCoords.lng,
+            price: Number(assist.costo_total) || (baseFee + (distMeters / 1000) * kmRate),
+            distance: distMeters,
+            driverName: dName,
+            driverPhone: dPhone,
+            gruero_id: gId
+          };
+
+          if (active) {
+            setActiveTowJob(restoredJob);
+            setActiveVialAssist(assist);
+            
+            if (assist.estado === 'activa' || assist.estado === 'en_progreso') {
+              setTowState('dispatched');
+              setCitizenTab('home');
+            } else {
+              setTowState('proposed'); // proposed corresponds to pending / 'pendiente' load screen
+            }
+            console.log("[CITIZEN TARIFF RECOVERY] Successfully restored active assistance:", assist.id, assist.estado);
+          }
+        }
+      } catch (err) {
+        console.error("Error restoring citizen tow job:", err);
+      }
+    };
+
+    restoreCitizenTowJob();
+
+    return () => {
+      active = false;
+    };
+  }, [activeDevice, sessionUser?.id, tariffs]);
+
   // Real-time listener and fallback query for the citizen to sync the crane request status from Supabase
   useEffect(() => {
     if (activeDevice !== 'citizen' || !activeTowJob) return;
@@ -1080,25 +1165,23 @@ export default function App() {
 
         if (!updated) return;
 
-        if (updated.estado === 'activa' || updated.estado === 'aceptado') {
+        if ((updated.estado === 'activa' || updated.estado === 'en_progreso' || updated.estado === 'aceptado') && updated.gruero_id) {
           setTowState('dispatched');
           setCitizenTab('home'); // Permanently activate tracking view map instantly
-          if (updated.gruero_id) {
-            const { data: grueroRow } = await supabase
-              .from('grueros')
-              .select('nombre_completo, telefono')
-              .eq('id', updated.gruero_id)
-              .maybeSingle();
+          const { data: grueroRow } = await supabase
+            .from('grueros')
+            .select('nombre_completo, telefono')
+            .eq('id', updated.gruero_id)
+            .maybeSingle();
 
-            if (active) {
-              setActiveTowJob(prev => prev ? {
-                ...prev,
-                status: 'en_route',
-                driverName: grueroRow?.nombre_completo || 'Carlos Ruiz',
-                driverPhone: grueroRow?.telefono || 'No phone',
-                gruero_id: updated.gruero_id
-              } : null);
-            }
+          if (active) {
+            setActiveTowJob(prev => prev ? {
+              ...prev,
+              status: 'en_route',
+              driverName: grueroRow?.nombre_completo || 'Carlos Ruiz',
+              driverPhone: grueroRow?.telefono || 'No phone',
+              gruero_id: updated.gruero_id
+            } : null);
           }
         } else if (updated.estado === 'completado') {
           if (active) {
@@ -1107,6 +1190,12 @@ export default function App() {
             const rate = Number(updated.costo_total) || 28.50;
             setCitizenBalance(b => Math.max(0, b - rate));
             showMaterialAlert('🚜 Traslado Concluido', `La unidad de grúa ha completado el traslado. Se debitaron $${rate.toFixed(2)} USD de tu saldo del seguro.`);
+          }
+        } else if (updated.estado === 'cancelado') {
+          if (active) {
+            setTowState('idle');
+            setActiveTowJob(null);
+            showMaterialAlert('🚜 Traslado Cancelado', 'El servicio de asistencia vial de grúa ha sido cancelado.');
           }
         }
       } catch (err) {
@@ -1518,11 +1607,11 @@ export default function App() {
           return;
         }
 
-        // 1. Only check if we have an active ongoing tow job
-        const { data: activeList, error: activeErr } = await supabase
+        // 1. Check if we have an active ongoing tow job
+        const { data: activeList } = await supabase
           .from('asistencias_viales')
           .select('*')
-          .eq('estado', 'activa')
+          .in('estado', ['activa', 'en_progreso'])
           .eq('gruero_id', grueroId);
 
         if (!active) return;
@@ -1549,33 +1638,75 @@ export default function App() {
             latitude: Number(assist.ubicacion_origen_lat),
             longitude: Number(assist.ubicacion_origen_lng),
             price: Number(assist.costo_total),
-            distance: 4000
+            distance: assist.distancia_metros || 5400
           });
           setActiveVialAssist(assist);
         } else {
-          // No active job found for this operator in activeList
-          // Verify if we are currently dispatched to prevent race conditions or database lag resetting state to idle
-          if (towStateRef.current === 'dispatched' && activeTowJobRef.current) {
-            const { data: currentJob } = await supabase
-              .from('asistencias_viales')
-              .select('estado')
-              .eq('id', activeTowJobRef.current.id)
+          // Check for any pending dispatch assigned in DB to this driver (for socket failure bypass)
+          const { data: pendingList } = await supabase
+            .from('asistencias_viales')
+            .select('*')
+            .eq('estado', 'pendiente')
+            .eq('gruero_id', grueroId);
+
+          if (active && pendingList && pendingList.length > 0) {
+            const assist = pendingList[0];
+            const { data: userData } = await supabase
+              .from('usuarios')
+              .select('nombre_completo, contacto_emergencia_1_telefono')
+              .eq('id', assist.ciudadano_id)
               .maybeSingle();
-            
-            if (currentJob && (currentJob.estado === 'completado' || currentJob.estado === 'cancelado')) {
+
+            if (active) {
+              const cName = userData?.nombre_completo || 'Asegurado';
+              const cPhone = userData?.contacto_emergencia_1_telefono || 'No phone';
+
+              const destCoords = getCoordsFromText(assist.ubicacion_destino_texto || 'Plaza Venezuela');
+              const calculatedKm = calculateDistanceInKm(
+                Number(assist.ubicacion_origen_lat),
+                Number(assist.ubicacion_origen_lng),
+                destCoords.lat,
+                destCoords.lng
+              );
+
+              setTowState('proposed');
+              setActiveTowJob({
+                id: assist.id,
+                citizenName: cName,
+                citizenPhone: cPhone,
+                status: 'pending',
+                latitude: Number(assist.ubicacion_origen_lat),
+                longitude: Number(assist.ubicacion_origen_lng),
+                price: Number(assist.costo_total),
+                distance: assist.distancia_metros || Math.round(calculatedKm * 1000)
+              });
+              setActiveVialAssist(assist);
+            }
+          } else {
+            // No active or pending job found for this operator
+            // Verify if we are currently dispatched to prevent race conditions or database lag resetting state to idle
+            if (towStateRef.current === 'dispatched' && activeTowJobRef.current) {
+              const { data: currentJob } = await supabase
+                .from('asistencias_viales')
+                .select('estado')
+                .eq('id', activeTowJobRef.current.id)
+                .maybeSingle();
+              
+              if (currentJob && (currentJob.estado === 'completado' || currentJob.estado === 'cancelado')) {
+                setTowState('idle');
+                setActiveTowJob(null);
+                setActiveVialAssist(null);
+              }
+              // Preserve the dispatched state if the database does not explicitly confirm cancellation/conclusion
+              return;
+            }
+
+            // Only preserve state if it was proposed by a real-time INSERT event.
+            if (towStateRef.current !== 'proposed') {
               setTowState('idle');
               setActiveTowJob(null);
               setActiveVialAssist(null);
             }
-            // Preserve the dispatched state if the database does not explicitly confirm cancellation/conclusion
-            return;
-          }
-
-          // Only preserve state if it was proposed by a real-time INSERT event.
-          if (towStateRef.current !== 'proposed') {
-            setTowState('idle');
-            setActiveTowJob(null);
-            setActiveVialAssist(null);
           }
         }
       } catch (err) {
@@ -4963,25 +5094,44 @@ export default function App() {
                               </span>
                             </div>
 
-                            {/* Transparent Pricing Split Details */}
-                            <div className="bg-slate-900 rounded-xl p-2.5 border border-indigo-500/15 text-[10px] space-y-1.5 font-mono">
-                              <div className="flex justify-between text-slate-400 border-b border-white/5 pb-1">
-                                <span>Vehículo Configurado:</span>
-                                <span className="text-white font-sans">{citizenVehicleType === 'coche' ? '🚗 Automóvil / Coche' : '🏍️ Motocicleta / Moto'}</span>
-                              </div>
-                              <div className="flex justify-between text-red-400">
-                                <span>Debitado de tu cuenta:</span>
-                                <strong>- $ {activeTowJob.price.toFixed(2)} USD</strong>
-                              </div>
-                              <div className="flex justify-between text-green-400">
-                                <span>Acreditado al chofer (Neto 80%):</span>
-                                <strong>+ $ {(activeTowJob.price * 0.8).toFixed(2)} USD</strong>
-                              </div>
-                              <div className="flex justify-between text-slate-500">
-                                <span>Fondo Operaciones (20%):</span>
-                                <span>$ {(activeTowJob.price * 0.2).toFixed(2)} USD</span>
-                              </div>
-                            </div>
+                             {/* Transparent Pricing Split Details */}
+                             <div className="bg-slate-900 rounded-xl p-2.5 border border-indigo-500/15 text-[10px] space-y-1.5 font-mono">
+                               <div className="flex justify-between text-slate-400 border-b border-white/5 pb-1">
+                                 <span>Vehículo Configurado:</span>
+                                 <span className="text-white font-sans">{citizenVehicleType === 'coche' ? '🚗 Automóvil / Coche' : '🏍️ Motocicleta / Moto'}</span>
+                               </div>
+                               {(() => {
+                                 const distKm = (activeTowJob.distance || 5400) / 1000;
+                                 const baseFee = tariffs.grua?.tarifa_base ?? 30.00;
+                                 const kmRate = tariffs.grua?.precio_por_km ?? 4.50;
+                                 const costKm = distKm * kmRate;
+                                 const totalCalculated = baseFee + costKm;
+                                 return (
+                                   <>
+                                     <div className="flex justify-between text-slate-400">
+                                       <span>Tarifa Base Grúa:</span>
+                                       <span>$ {baseFee.toFixed(2)} USD</span>
+                                     </div>
+                                     <div className="flex justify-between text-slate-400">
+                                       <span>Distancia Recorrida ({distKm.toFixed(2)} Km):</span>
+                                       <span>$ {costKm.toFixed(2)} USD</span>
+                                     </div>
+                                     <div className="flex justify-between text-red-400 border-t border-white/5 pt-1">
+                                       <span>Debitado de tu cuenta:</span>
+                                       <strong>- $ {totalCalculated.toFixed(2)} USD</strong>
+                                     </div>
+                                     <div className="flex justify-between text-green-400 font-sans">
+                                       <span>Acreditado al chofer (80%):</span>
+                                       <strong>+ $ {(totalCalculated * 0.8).toFixed(2)} USD</strong>
+                                     </div>
+                                     <div className="flex justify-between text-slate-500">
+                                       <span>Fondo Operaciones (20%):</span>
+                                       <span>$ {(totalCalculated * 0.2).toFixed(2)} USD</span>
+                                     </div>
+                                   </>
+                                 );
+                               })()}
+                             </div>
 
                             {/* Live road tracking map */}
                             {towState === 'dispatched' && craneUnitState?.lat_actual && craneUnitState?.lng_actual && (activeTowJob?.latitude || citizenCoords.lat) && (activeTowJob?.longitude || citizenCoords.lng) ? (
@@ -6356,9 +6506,23 @@ export default function App() {
                                     🚨 DESPACHO VIAL DETECTADO
                                   </span>
                                   <h4 className="text-sm font-black mt-2">Asegurado: {activeTowJob.citizenName}</h4>
-                                  <p className="text-[11px] text-slate-800 leading-tight mt-1">
-                                    Ubicación de colisión reportada a 3.4 km. Ganancia Estimada: $ {(activeTowJob.price * 0.90).toFixed(2)} USD (Deducción 10% App).
-                                  </p>
+                                  {(() => {
+                                    const distKm = (activeTowJob.distance || 5400) / 1000;
+                                    const baseF = tariffs.grua?.tarifa_base ?? 30.00;
+                                    const kmR = tariffs.grua?.precio_por_km ?? 4.50;
+                                    const costKm = distKm * kmR;
+                                    const totalCalculated = baseF + costKm;
+                                    const driverEarnings = totalCalculated * 0.80; // 80% split for driver, 20% platform
+                                    return (
+                                      <div className="text-[11px] text-slate-800 space-y-1 mt-2 font-mono">
+                                        <p>• Distancia real (GPS): <span className="font-sans font-bold">{distKm.toFixed(2)} Km</span></p>
+                                        <p>• Tarifa Base: <span className="font-sans font-bold">${baseF.toFixed(2)} USD</span></p>
+                                        <p>• Costo por Km (${kmR.toFixed(2)}/km): <span className="font-sans font-bold">${costKm.toFixed(2)} USD</span></p>
+                                        <p className="border-t border-black/10 pt-1">• Costo Total: <span className="font-sans font-bold text-xs">${totalCalculated.toFixed(2)} USD</span></p>
+                                        <p className="font-sans font-extrabold text-slate-950">💰 Ganancia Estimada (80%): ${driverEarnings.toFixed(2)} USD</p>
+                                      </div>
+                                    );
+                                  })()}
                                 </div>
 
                                 <button 

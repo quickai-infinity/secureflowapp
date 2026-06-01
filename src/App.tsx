@@ -1413,6 +1413,45 @@ export default function App() {
     let active = true;
     let channel: any = null;
 
+    const handleIncomingPendiente = async (assist: any) => {
+      try {
+        if (!active) return;
+        const { data: userData } = await supabase
+          .from('usuarios')
+          .select('nombre_completo, contacto_emergencia_1_telefono')
+          .eq('id', assist.ciudadano_id)
+          .maybeSingle();
+
+        if (!active) return;
+
+        const cName = userData?.nombre_completo || 'Asegurado';
+        const cPhone = userData?.contacto_emergencia_1_telefono || 'No phone';
+
+        const destCoords = getCoordsFromText(assist.ubicacion_destino_texto || 'Plaza Venezuela');
+        const calculatedKm = calculateDistanceInKm(
+          Number(assist.ubicacion_origen_lat),
+          Number(assist.ubicacion_origen_lng),
+          destCoords.lat,
+          destCoords.lng
+        );
+
+        setTowState('proposed');
+        setActiveTowJob({
+          id: assist.id,
+          citizenName: cName,
+          citizenPhone: cPhone,
+          status: 'pending',
+          latitude: Number(assist.ubicacion_origen_lat),
+          longitude: Number(assist.ubicacion_origen_lng),
+          price: Number(assist.costo_total),
+          distance: Math.round(calculatedKm * 1000)
+        });
+        setActiveVialAssist(assist);
+      } catch (err) {
+        console.error("Error setting proposed job from insert payload:", err);
+      }
+    };
+
     const syncDriverTowState = async () => {
       try {
         // First resolve actual gruero_id of logged-in user
@@ -1429,7 +1468,7 @@ export default function App() {
           return;
         }
 
-        // 1. First, check if we have an active ongoing tow job
+        // 1. Only check if we have an active ongoing tow job
         const { data: activeList, error: activeErr } = await supabase
           .from('asistencias_viales')
           .select('*')
@@ -1463,56 +1502,11 @@ export default function App() {
             distance: 4000
           });
           setActiveVialAssist(assist);
-          return;
-        }
-
-        // 2. If no active job, check if there is any pending proposed request assigned or open
-        const { data: pendingList, error: pendingErr } = await supabase
-          .from('asistencias_viales')
-          .select('*')
-          .eq('estado', 'pendiente');
-
-        if (!active) return;
-
-        const myPending = pendingList?.filter(p => !p.gruero_id || p.gruero_id === grueroId) || [];
-
-        if (myPending.length > 0) {
-          const assist = myPending[0];
-          const { data: userData } = await supabase
-            .from('usuarios')
-            .select('nombre_completo, contacto_emergencia_1_telefono')
-            .eq('id', assist.ciudadano_id)
-            .maybeSingle();
-
-          if (!active) return;
-
-          const cName = userData?.nombre_completo || 'Asegurado';
-          const cPhone = userData?.contacto_emergencia_1_telefono || 'No phone';
-
-          // Coordenadas destino e inicio
-          const destCoords = getCoordsFromText(assist.ubicacion_destino_texto || 'Plaza Venezuela');
-          const calculatedKm = calculateDistanceInKm(
-            Number(assist.ubicacion_origen_lat),
-            Number(assist.ubicacion_origen_lng),
-            destCoords.lat,
-            destCoords.lng
-          );
-
-          setTowState('proposed');
-          setActiveTowJob({
-            id: assist.id,
-            citizenName: cName,
-            citizenPhone: cPhone,
-            status: 'pending',
-            latitude: Number(assist.ubicacion_origen_lat),
-            longitude: Number(assist.ubicacion_origen_lng),
-            price: Number(assist.costo_total),
-            distance: Math.round(calculatedKm * 1000)
-          });
-          setActiveVialAssist(assist);
         } else {
-          // No proposed or active job
-          if (towStateRef.current !== 'idle') {
+          // No active job in progress
+          // Do NOT check for pending requests in database query to avoid showing alerts for old requests on mount.
+          // Only preserve state if it was proposed by a real-time INSERT event.
+          if (towStateRef.current !== 'proposed') {
             setTowState('idle');
             setActiveTowJob(null);
             setActiveVialAssist(null);
@@ -1523,7 +1517,7 @@ export default function App() {
       }
     };
 
-    // Run synchronization immediately
+    // Run synchronization immediately for active ongoing services
     syncDriverTowState();
 
     // Setup Supabase Real-Time subscription exclusively for public.asistencias_viales table
@@ -1531,16 +1525,34 @@ export default function App() {
       .channel('driver-vial-assist-channel')
       .on(
         'postgres_changes',
-        { event: '*', schema: 'public', table: 'asistencias_viales' },
+        { event: 'INSERT', schema: 'public', table: 'asistencias_viales' },
         (payload) => {
-          if (active) {
-            syncDriverTowState();
+          if (active && payload.new && payload.new.estado === 'pendiente') {
+            handleIncomingPendiente(payload.new);
+          }
+        }
+      )
+      .on(
+        'postgres_changes',
+        { event: 'UPDATE', schema: 'public', table: 'asistencias_viales' },
+        (payload) => {
+          if (active && payload.new) {
+            if (payload.new.estado === 'activa' && payload.new.gruero_id) {
+              // Resync state if it was activated
+              syncDriverTowState();
+            } else if (payload.new.estado === 'completado' || payload.new.estado === 'cancelado') {
+              if (activeVialAssist && payload.new.id === activeVialAssist.id) {
+                setTowState('idle');
+                setActiveTowJob(null);
+                setActiveVialAssist(null);
+              }
+            }
           }
         }
       )
       .subscribe();
 
-    // Robust fast-polling backup to guarantee instant state updates if WebSockets ever flicker
+    // Robust fast-polling backup to guarantee active state updates if WebSockets ever flicker
     const interval = setInterval(() => {
       if (active) {
         syncDriverTowState();
@@ -6239,6 +6251,32 @@ export default function App() {
                                 </button>
                               </div>
                             </div>
+
+                            {/* Waiting/Idle State */}
+                            {towState === 'idle' && (
+                              <div className="p-6 bg-slate-900 border border-slate-800 rounded-3xl text-center space-y-4">
+                                <div className="relative flex justify-center items-center h-16 w-16 mx-auto">
+                                  {towDriverOnline ? (
+                                    <>
+                                      <span className="animate-ping absolute inline-flex h-10 w-10 rounded-full bg-emerald-400 opacity-20"></span>
+                                      <span className="relative inline-flex rounded-full h-8 w-8 bg-emerald-500 justify-center items-center text-slate-950 text-sm font-black">🚜</span>
+                                    </>
+                                  ) : (
+                                    <span className="relative inline-flex rounded-full h-8 w-8 bg-slate-800 justify-center items-center text-slate-500 text-sm font-black">🚜</span>
+                                  )}
+                                </div>
+                                <div className="space-y-1">
+                                  <h4 className="text-sm font-medium text-white">
+                                    {towDriverOnline ? 'Central de Guardia Activa' : 'Guardia Inactiva'}
+                                  </h4>
+                                  <p className="text-[11px] text-slate-400">
+                                    {towDriverOnline 
+                                      ? 'En línea, esperando solicitudes reales del ciudadano en tiempo real...' 
+                                      : 'Desconectado del sistema. Activa tu disponibilidad para empezar a recibir alertas.'}
+                                  </p>
+                                </div>
+                              </div>
+                            )}
 
                             {/* Incoming dispatch notifications to show multi-view communication */}
                             {towState === 'proposed' && activeTowJob && (

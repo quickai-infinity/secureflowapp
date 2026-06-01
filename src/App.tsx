@@ -138,6 +138,7 @@ interface TowJob {
   distance: number;
   driverName?: string;
   driverPhone?: string;
+  vehiclePlate?: string;
   gruero_id?: string;
 }
 
@@ -1083,16 +1084,18 @@ export default function App() {
           let dName = 'Carlos Ruiz';
           let dPhone = 'No phone';
           let gId = assist.gruero_id;
+          let vPlate = 'A92B45X';
           
           if (gId) {
             const { data: grueroRow } = await supabase
               .from('grueros')
-              .select('nombre_completo, telefono')
+              .select('nombre_completo, telefono, placa_vehiculo')
               .eq('id', gId)
               .maybeSingle();
             if (active && grueroRow) {
               dName = grueroRow.nombre_completo;
               dPhone = grueroRow.telefono;
+              vPlate = grueroRow.placa_vehiculo || 'A92B45X';
             }
           }
 
@@ -1114,6 +1117,7 @@ export default function App() {
             distance: distMeters,
             driverName: dName,
             driverPhone: dPhone,
+            vehiclePlate: vPlate,
             gruero_id: gId
           };
 
@@ -1170,18 +1174,25 @@ export default function App() {
           setCitizenTab('home'); // Permanently activate tracking view map instantly
           const { data: grueroRow } = await supabase
             .from('grueros')
-            .select('nombre_completo, telefono')
+            .select('nombre_completo, telefono, placa_vehiculo')
             .eq('id', updated.gruero_id)
             .maybeSingle();
 
           if (active) {
-            setActiveTowJob(prev => prev ? {
-              ...prev,
-              status: 'en_route',
-              driverName: grueroRow?.nombre_completo || 'Carlos Ruiz',
-              driverPhone: grueroRow?.telefono || 'No phone',
-              gruero_id: updated.gruero_id
-            } : null);
+            setActiveVialAssist(updated);
+            setActiveTowJob(prev => {
+              if (prev && (prev.status !== 'en_route' || prev.gruero_id !== updated.gruero_id || prev.vehiclePlate !== grueroRow?.placa_vehiculo)) {
+                return {
+                  ...prev,
+                  status: 'en_route',
+                  driverName: grueroRow?.nombre_completo || 'Carlos Ruiz',
+                  driverPhone: grueroRow?.telefono || 'No phone',
+                  vehiclePlate: grueroRow?.placa_vehiculo || 'A92B45X',
+                  gruero_id: updated.gruero_id
+                };
+              }
+              return prev;
+            });
           }
         } else if (updated.estado === 'completado') {
           if (active) {
@@ -1298,7 +1309,16 @@ export default function App() {
 
   // Subscribe to and periodically track the crane's position from 'unidades_grua' table if dispatched
   useEffect(() => {
-    if (towState !== 'dispatched' || !activeTowJob) return;
+    const isCitizenActive = !!activeTowJob && (
+      towState === 'dispatched' || 
+      activeTowJob.status === 'en_route' || 
+      activeTowJob.status === 'active' || 
+      activeTowJob.gruero_id || 
+      activeVialAssist?.estado === 'activa' || 
+      activeVialAssist?.estado === 'en_progreso' || 
+      activeVialAssist?.gruero_id
+    );
+    if (!isCitizenActive || !activeTowJob) return;
 
     let active = true;
     let channel: any = null;
@@ -1369,7 +1389,7 @@ export default function App() {
         supabase.removeChannel(channel);
       }
     };
-  }, [towState, activeTowJob?.id]);
+  }, [towState, activeTowJob?.id, activeTowJob?.gruero_id, activeVialAssist?.estado, activeVialAssist?.gruero_id]);
 
   // Driver subscribes to and polls Citizen location from 'asistencias_viales' in real-time
   useEffect(() => {
@@ -5034,23 +5054,38 @@ export default function App() {
                   <div className="flex-1 overflow-y-auto overflow-x-hidden scrollbar-thin">
                     
                     {/* TAB CITIZEN HOME */}
-                    {citizenTab === 'home' && (
-                      <div className="p-4 space-y-4">
-                        {towState === 'dispatched' && activeTowJob ? (
-                          /* PANTALLA COMPLETA DE SEGUIMIENTO EN VIVO SEGÚN REGLA ESTRICTA DE LA MÁQUINA DE ESTADOS */
-                          <div className="animate-fade-in space-y-4">
-                            <div className="flex justify-between items-center bg-indigo-950/40 p-3 rounded-2xl border border-indigo-500/20">
-                              <div className="text-left">
-                                <span className="text-[10px] font-bold text-indigo-400 font-mono tracking-widest uppercase animate-pulse block">🚜 GRÚA EN RUTA</span>
-                                <h3 className="text-xs font-black text-white mt-1">Conductor: {activeTowJob.driverName || 'Operator de Guardia'}</h3>
-                                {activeTowJob.driverPhone && (
-                                  <p className="text-[10px] text-slate-400 font-mono mt-0.5">{activeTowJob.driverPhone}</p>
-                                )}
+                    {citizenTab === 'home' && (() => {
+                      const isCitizenTowActive = !!activeTowJob && (
+                        towState === 'dispatched' || 
+                        activeTowJob.status === 'en_route' || 
+                        activeTowJob.status === 'active' || 
+                        activeTowJob.gruero_id || 
+                        activeVialAssist?.estado === 'activa' || 
+                        activeVialAssist?.estado === 'en_progreso' || 
+                        activeVialAssist?.gruero_id
+                      );
+                      return (
+                        <div className="p-4 space-y-4">
+                          {isCitizenTowActive ? (
+                            /* PANTALLA COMPLETA DE SEGUIMIENTO EN VIVO SEGÚN REGLA ESTRICTA DE LA MÁQUINA DE ESTADOS */
+                            <div className="animate-fade-in space-y-4">
+                              <div className="flex justify-between items-center bg-indigo-950/40 p-3 rounded-2xl border border-indigo-500/20">
+                                <div className="text-left">
+                                  <span className="text-[10px] font-bold text-indigo-400 font-mono tracking-widest uppercase animate-pulse block">🚜 GRÚA EN RUTA</span>
+                                  <h3 className="text-xs font-black text-white mt-1">Conductor: {activeTowJob.driverName || 'Operador de Guardia'}</h3>
+                                  <div className="flex items-center gap-2 mt-1">
+                                    {activeTowJob.driverPhone && (
+                                      <span className="text-[10px] text-slate-400 font-mono">{activeTowJob.driverPhone}</span>
+                                    )}
+                                    <span className="text-[9px] bg-indigo-900 text-yellow-400 px-1.5 py-0.5 rounded font-bold uppercase tracking-wider border border-yellow-500/30">
+                                      Placa: {activeTowJob.vehiclePlate || 'A92B45X'}
+                                    </span>
+                                  </div>
+                                </div>
+                                <span className="text-[10px] bg-indigo-900/40 text-indigo-200 px-2 py-1 rounded-lg border border-indigo-500/10 font-mono self-start shrink-0">
+                                  ETA • {Math.ceil((activeTowJob.distance || 5400) / 150) || 5} min
+                                </span>
                               </div>
-                              <span className="text-[10px] bg-indigo-900/40 text-indigo-200 px-2 py-1 rounded-lg border border-indigo-500/10 font-mono self-start shrink-0">
-                                ETA • {Math.ceil((activeTowJob.distance || 5400) / 150) || 5} min
-                              </span>
-                            </div>
 
                             {/* Transparent Pricing Split Details */}
                             <div className="bg-slate-900 rounded-2xl p-3 border border-indigo-500/15 text-[10px] space-y-1.5 font-mono">
@@ -5309,7 +5344,8 @@ export default function App() {
                           </>
                         )}
                       </div>
-                    )}
+                    );
+                  })()}
 
                     {/* TAB CITIZEN AI AGENT & CHATS */}
                     {citizenTab === 'agent' && (

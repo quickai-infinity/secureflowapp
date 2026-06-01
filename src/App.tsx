@@ -1804,6 +1804,32 @@ export default function App() {
           return;
         }
 
+        // AUTO-INITIALIZE Crane Coords to Caracas if unassigned / 0 in database to prevent multi-thousand KM issues
+        try {
+          const { data: unitRow } = await supabase
+            .from('unidades_grua')
+            .select('id, lat_actual, lng_actual')
+            .eq('gruero_id', grueroId)
+            .maybeSingle();
+
+          if (unitRow) {
+            const latVal = Number(unitRow.lat_actual);
+            const lngVal = Number(unitRow.lng_actual);
+            if (isNaN(latVal) || isNaN(lngVal) || latVal === 0 || lngVal === 0) {
+              await supabase
+                .from('unidades_grua')
+                .update({
+                  lat_actual: 10.4900,
+                  lng_actual: -66.9100,
+                  estado: 'disponible'
+                })
+                .eq('id', unitRow.id);
+            }
+          }
+        } catch (initErr) {
+          console.error("Error auto-initializing driver coords to Caracas:", initErr);
+        }
+
         // 1. Check working emergencias_activas first
         const { data: emerList } = await supabase
           .from('emergencias_activas')
@@ -3968,7 +3994,7 @@ export default function App() {
         for (const unit of units) {
           const lat = Number(unit.lat_actual);
           const lng = Number(unit.lng_actual);
-          if (!isNaN(lat) && !isNaN(lng)) {
+          if (!isNaN(lat) && !isNaN(lng) && lat !== 0 && lng !== 0) {
             const dist = getHaversineDistance(citizenCoords.lat, citizenCoords.lng, lat, lng);
             if (dist < closestDistance) {
               closestDistance = dist;
@@ -4101,6 +4127,41 @@ export default function App() {
       triggerPush('🚜 Alerta Solicitud Grúa', 'Buscando unidad de grúa disponible en el sector...');
     } catch (e) {
       console.error("Error creating pending tow row in Supabase:", e);
+    }
+  };
+
+  const handleCancelTowRequest = async () => {
+    const jobId = activeTowJob?.id || activeVialAssist?.id;
+    if (!jobId) {
+      setTowState('idle');
+      setActiveTowJob(null);
+      setActiveVialAssist(null);
+      return;
+    }
+
+    try {
+      // 1. Update working emergencias_activas to completed (which means finished/cancelled)
+      await supabase
+        .from('emergencias_activas')
+        .update({ estado: 'completed' })
+        .eq('id', jobId);
+
+      // 2. Update asistencias_viales to cancelado
+      await supabase
+        .from('asistencias_viales')
+        .update({ estado: 'cancelado' })
+        .eq('id', jobId);
+      
+      setTowState('idle');
+      setActiveTowJob(null);
+      setActiveVialAssist(null);
+      showMaterialAlert('🚜 Traslado Cancelado', 'El servicio de asistencia vial de grúa ha sido cancelado con éxito.');
+    } catch (err) {
+      console.error("Error canceling tow request:", err);
+      // fallback clear
+      setTowState('idle');
+      setActiveTowJob(null);
+      setActiveVialAssist(null);
     }
   };
 
@@ -5656,14 +5717,24 @@ export default function App() {
                             {/* Interactive dynamic TOW tracking map */}
                             {towState === 'proposed' && activeTowJob && (
                               <div className="p-4 bg-yellow-500/10 border border-yellow-500/30 rounded-2xl space-y-3 text-center animate-pulse">
+                                <div className="flex justify-between items-center text-[9px] text-yellow-500/60 font-mono">
+                                  <span>ORDEN DE DESPACHO</span>
+                                  <span>ID: {activeTowJob.id.substring(0, 8).toUpperCase()}</span>
+                                </div>
                                 <span className="text-2xl block">🚜</span>
                                 <span className="text-xs text-yellow-550 font-black block uppercase">Despachando Unidad Vial...</span>
                                 <p className="text-[10px] text-slate-300">
-                                  Hemos notificado al operador de grúa en zona. Esperando confirmación de {driverProfile.name || 'Carlos Ruiz'}. Puedes activar el canal de grúa para ver status.
+                                  Hemos notificado al operador de grúa en zona. Esperando confirmación de {activeTowJob.driverName || 'Carlos Ruiz'}. Puedes activar el canal de grúa para ver status.
                                 </p>
                                 <div className="w-full bg-slate-800 rounded-full h-1 relative overflow-hidden">
                                   <div className="bg-yellow-500 h-full rounded-full animate-sweep" style={{ width: '40%' }} />
                                 </div>
+                                <button
+                                  onClick={handleCancelTowRequest}
+                                  className="w-full bg-red-500/20 hover:bg-red-500/35 border border-red-500/30 text-red-500 py-1.5 rounded-xl text-[10px] font-bold uppercase tracking-wider transition-all select-none"
+                                >
+                                  ❌ Cancelar Solicitud
+                                </button>
                               </div>
                             )}
 

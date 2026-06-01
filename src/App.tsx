@@ -520,6 +520,44 @@ export default function App() {
   const [ambulanceBalanceClean, setAmbulanceBalanceClean] = useState<number>(0.00);
   const [medicBalanceClean, setMedicBalanceClean] = useState<number>(0.00);
   const [showBinanceModal, setShowBinanceModal] = useState(false);
+
+  // Tariffs State managed dynamically from Supabase config_tarifas
+  const [tariffs, setTariffs] = useState<{ [key: string]: { tarifa_base: number; precio_por_km: number } }>({
+    grua: { tarifa_base: 30.00, precio_por_km: 4.50 },
+    medico: { tarifa_base: 20.00, precio_por_km: 0.00 },
+    abogado: { tarifa_base: 15.00, precio_por_km: 0.00 }
+  });
+
+  useEffect(() => {
+    const fetchConfigTarifas = async () => {
+      try {
+        const { data, error } = await supabase.from('config_tarifas').select('*');
+        if (!error && data && data.length > 0) {
+          const updatedTariffs = {
+            grua: { tarifa_base: 30.00, precio_por_km: 4.50 },
+            medico: { tarifa_base: 20.00, precio_por_km: 0.00 },
+            abogado: { tarifa_base: 15.00, precio_por_km: 0.00 }
+          };
+          data.forEach((row: any) => {
+            const svc = row.tipo_servicio;
+            if (svc === 'grua' || svc === 'medico' || svc === 'abogado') {
+              updatedTariffs[svc] = {
+                tarifa_base: row.tarifa_base !== null && row.tarifa_base !== undefined ? Number(row.tarifa_base) : updatedTariffs[svc].tarifa_base,
+                precio_por_km: row.precio_por_km !== null && row.precio_por_km !== undefined ? Number(row.precio_por_km) : updatedTariffs[svc].precio_por_km
+              };
+            }
+          });
+          setTariffs(updatedTariffs);
+          console.log("[CONFIG_TARIFAS] Dynamic rates loaded:", updatedTariffs);
+        } else {
+          console.log("[CONFIG_TARIFAS] No custom rates. Using safe defaults.", error);
+        }
+      } catch (err) {
+        console.error("Exception loading config_tarifas:", err);
+      }
+    };
+    fetchConfigTarifas();
+  }, []);
   const [towDriverCoords, setTowDriverCoords] = useState<{lat: number, lng: number}>({lat: 10.4900, lng: -66.9100});
   const [citizenCoords, setCitizenCoords] = useState<{lat: number, lng: number}>({lat: 10.4850, lng: -66.9030});
   const [towMessages, setTowMessages] = useState<Message[]>([]);
@@ -558,6 +596,17 @@ export default function App() {
   useEffect(() => {
     towStateRef.current = towState;
   }, [towState]);
+
+  const activeTowJobRef = useRef(activeTowJob);
+  useEffect(() => {
+    activeTowJobRef.current = activeTowJob;
+  }, [activeTowJob]);
+
+  useEffect(() => {
+    if (tariffs.abogado) {
+      setSosCostRate(tariffs.abogado.tarifa_base);
+    }
+  }, [tariffs]);
 
   // Trigger visual alert modal simulation
   const showMaterialAlert = (title: string, message: string, onConfirm?: () => void) => {
@@ -1033,6 +1082,7 @@ export default function App() {
 
         if (updated.estado === 'activa' || updated.estado === 'aceptado') {
           setTowState('dispatched');
+          setCitizenTab('home'); // Permanently activate tracking view map instantly
           if (updated.gruero_id) {
             const { data: grueroRow } = await supabase
               .from('grueros')
@@ -1503,8 +1553,24 @@ export default function App() {
           });
           setActiveVialAssist(assist);
         } else {
-          // No active job in progress
-          // Do NOT check for pending requests in database query to avoid showing alerts for old requests on mount.
+          // No active job found for this operator in activeList
+          // Verify if we are currently dispatched to prevent race conditions or database lag resetting state to idle
+          if (towStateRef.current === 'dispatched' && activeTowJobRef.current) {
+            const { data: currentJob } = await supabase
+              .from('asistencias_viales')
+              .select('estado')
+              .eq('id', activeTowJobRef.current.id)
+              .maybeSingle();
+            
+            if (currentJob && (currentJob.estado === 'completado' || currentJob.estado === 'cancelado')) {
+              setTowState('idle');
+              setActiveTowJob(null);
+              setActiveVialAssist(null);
+            }
+            // Preserve the dispatched state if the database does not explicitly confirm cancellation/conclusion
+            return;
+          }
+
           // Only preserve state if it was proposed by a real-time INSERT event.
           if (towStateRef.current !== 'proposed') {
             setTowState('idle');
@@ -2571,17 +2637,18 @@ export default function App() {
 
   // SecureFlow Telemedicine Video Consultation Request
   const handleMedicRequest = () => {
-    if (citizenBalance < 20.0) {
+    const medicalFee = tariffs.medico?.tarifa_base ?? 20.00;
+    if (citizenBalance < medicalFee) {
       showMaterialAlert(
         '💰 Saldo Insuficiente',
-        `La tarifa reducida por telemedicina SOS con doctor de guardia es de $20.00. Tu saldo actual es de $${citizenBalance.toFixed(2)}. Por favor, recarga saldo presionando "Ver mi Saldo".`
+        `La tarifa reducida por telemedicina SOS con doctor de guardia es de $${medicalFee.toFixed(2)}. Tu saldo actual es de $${citizenBalance.toFixed(2)}. Por favor, recarga saldo presionando "Ver mi Saldo".`
       );
       return;
     }
 
     showMaterialConfirm(
       '🏥 Chat & Consulta Médica',
-      `¿Deseas activar una consulta médica inmediata con el médico cirujano de guardia? Podrán chatear primero y activar videollamada si ambos están de acuerdo. Tarifa: $20.00 USD.`,
+      `¿Deseas activar una consulta médica inmediata con el médico cirujano de guardia? Podrán chatear primero y activar videollamada si ambos están de acuerdo. Tarifa: $${medicalFee.toFixed(2)} USD.`,
       async () => {
         setMedicState('calling');
         setIsMedicWindowOpen(false);
@@ -2612,7 +2679,7 @@ export default function App() {
             ubicacion_texto: citizenProfile.city || 'Caracas',
             ubicacion_lat: citizenCoords.lat,
             ubicacion_lng: citizenCoords.lng,
-            tarifa_aplicada: 20.0,
+            tarifa_aplicada: medicalFee,
             sala_webrtc_url: "https://meet.jit.si/SecureFlow-Medic-" + emerId
           });
           
@@ -3338,8 +3405,8 @@ export default function App() {
   const handleTowRequest = async () => {
     setIsAuthLoading(true);
     let assignedGrueroId = null;
-    let baseFee = citizenVehicleType === 'coche' ? 20.00 : 12.00;
-    let kmRate = citizenVehicleType === 'coche' ? 3.50 : 2.00;
+    let baseFee = tariffs.grua?.tarifa_base ?? (citizenVehicleType === 'coche' ? 30.00 : 20.00);
+    let kmRate = tariffs.grua?.precio_por_km ?? (citizenVehicleType === 'coche' ? 4.50 : 3.00);
     let distanceInKm = 5.4; // default / fallback distance
 
     try {
@@ -3444,8 +3511,8 @@ export default function App() {
 
         const grueroObj: any = selectedUnit.grueros;
         if (grueroObj) {
-          baseFee = Number(grueroObj.tarifa_base) || baseFee;
-          kmRate = Number(grueroObj.precio_km) || kmRate;
+          baseFee = tariffs.grua?.tarifa_base ?? (Number(grueroObj.tarifa_base) || baseFee);
+          kmRate = tariffs.grua?.precio_por_km ?? (Number(grueroObj.precio_km) || kmRate);
         }
       } else {
         // If still no unit, select any registered gruero from the db
@@ -3457,8 +3524,8 @@ export default function App() {
 
         if (fallbackGruero) {
           assignedGrueroId = fallbackGruero.id;
-          baseFee = Number(fallbackGruero.tarifa_base) || baseFee;
-          kmRate = Number(fallbackGruero.precio_km) || kmRate;
+          baseFee = tariffs.grua?.tarifa_base ?? (Number(fallbackGruero.tarifa_base) || baseFee);
+          kmRate = tariffs.grua?.precio_por_km ?? (Number(fallbackGruero.precio_km) || kmRate);
         }
       }
     } catch (err) {
@@ -3475,11 +3542,14 @@ export default function App() {
 
     // Native window.confirm prompt
     const userConfirmed = window.confirm(
-      `城乡/Secured GRÚA DETECTADA 🚜\n` +
-      `• Distancia: ${distanceInKm.toFixed(1)} KM\n` +
+      `🚜 SOLICITUD DE ASISTENCIA VIAL EN CAMINO\n\n` +
+      `Fórmula de Tarifas de Producción Sincronizada:\n` +
       `• Tarifa Base: $${baseFee.toFixed(2)} USD\n` +
-      `• Costo total calculado: $${costoTotal.toFixed(2)} USD\n\n` +
-      `¿Aceptar y solicitar?`
+      `• Precio por KM: $${kmRate.toFixed(2)} USD\n` +
+      `• Distancia Real (GPS): ${distanceInKm.toFixed(2)} KM\n` +
+      `• Desglose Real: $${baseFee.toFixed(2)} + (${distanceInKm.toFixed(2)} km * $${kmRate.toFixed(2)}/km)\n` +
+      `• Costo Total Calculado: $${costoTotal.toFixed(2)} USD\n\n` +
+      `¿Aceptar y proceder con el despacho de la grúa?`
     );
 
     if (!userConfirmed) {

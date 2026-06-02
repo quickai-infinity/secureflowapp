@@ -886,8 +886,58 @@ export default function App() {
         .or(`auth_id.eq.${resolvedUserId},id.eq.${resolvedUserId}`)
         .maybeSingle();
 
-      if (userData) {
-        let rawRole = userData.rol || userData.role || '';
+      let finalUserData = userData;
+
+      if (!finalUserData) {
+        try {
+          const { data: sessionData } = await supabase.auth.getSession();
+          const userMeta = sessionData?.session?.user?.user_metadata;
+          if (userMeta) {
+            const rawRole = userMeta.role || userMeta.rol || 'citizen';
+            const finalRole = getNormalizedRole(rawRole);
+            const finalName = userMeta.nombre_completo || 'Usuario SecureFlow';
+            const finalPhone = userMeta.telefono || '584241234567';
+            const vehicleType = userMeta.tipo_vehiculo || 'coche';
+
+            console.log("Self-healing: Auto-provisioning missing 'usuarios' record for auth ID:", resolvedUserId);
+            
+            const { data: insertedUser, error: insertErr } = await supabase
+              .from('usuarios')
+              .insert([{
+                id: resolvedUserId,
+                auth_id: resolvedUserId,
+                rol: finalRole,
+                role: finalRole,
+                nombre_completo: finalName,
+                telefono: finalPhone,
+                cedula: userMeta.cedula || 'V-12.345.678',
+                email: resolvedEmail,
+                tipo_vehiculo: vehicleType,
+                vehicle_selection: vehicleType
+              }])
+              .select()
+              .maybeSingle();
+
+            if (!insertErr && insertedUser) {
+              finalUserData = insertedUser;
+              console.log("Self-healing: 'usuarios' record provisioned successfully!");
+              
+              // Also initialize citizen balance
+              await supabase.from('saldos').insert([{
+                usuario_id: resolvedUserId,
+                plan_activo: 'estandar',
+                creditos_disponibles: 35.0,
+                consultas_ia_usadas: 0
+              }]);
+            }
+          }
+        } catch (healErr) {
+          console.error("Self-healing error:", healErr);
+        }
+      }
+
+      if (finalUserData) {
+        let rawRole = finalUserData.rol || finalUserData.role || '';
         if (!rawRole) {
           const { data: sessionData } = await supabase.auth.getSession();
           const userMeta = sessionData?.session?.user?.user_metadata;
@@ -900,29 +950,29 @@ export default function App() {
 
         if (finalRole === 'citizen') {
           setCitizenProfile({
-            name: userData.nombre_completo,
+            name: finalUserData.nombre_completo,
             email: resolvedEmail,
-            phone: userData.contacto_emergencia_1_telefono || '',
+            phone: finalUserData.contacto_emergencia_1_telefono || '',
             city: 'Caracas'
           });
-          const vSel = userData.vehicle_selection || userData.tipo_vehiculo;
+          const vSel = finalUserData.vehicle_selection || finalUserData.tipo_vehiculo;
           if (vSel) {
             setCitizenVehicleType(vSel as 'coche' | 'moto');
             localStorage.setItem('secureflow_vehicle_type', vSel);
           }
-          if (userData.contacto_emergencia_1_nombre || userData.contacto_emergencia_1_telefono) {
+          if (finalUserData.contacto_emergencia_1_nombre || finalUserData.contacto_emergencia_1_telefono) {
             setAlertContacts({
-              name1: userData.contacto_emergencia_1_nombre || 'Mi Madre',
-              tel1: userData.contacto_emergencia_1_telefono || '584249998877',
-              name2: userData.contacto_emergencia_2_nombre || 'Mi Hermano',
-              tel2: userData.contacto_emergencia_2_telefono || '584126665544'
+              name1: finalUserData.contacto_emergencia_1_nombre || 'Mi Madre',
+              tel1: finalUserData.contacto_emergencia_1_telefono || '584249998877',
+              name2: finalUserData.contacto_emergencia_2_nombre || 'Mi Hermano',
+              tel2: finalUserData.contacto_emergencia_2_telefono || '584126665544'
             });
           }
         } else if (finalRole === 'ambulance') {
           setAmbulanceProfile({
-            name: userData.nombre_completo,
+            name: finalUserData.nombre_completo,
             email: resolvedEmail,
-            phone: userData.contacto_emergencia_1_telefono || '',
+            phone: finalUserData.contacto_emergencia_1_telefono || '',
             city: 'Caracas',
             vehiclePlate: 'AMB-402X'
           });
@@ -936,9 +986,9 @@ export default function App() {
           }
         } else if (finalRole === 'medic') {
           setMedicProfile({
-            name: userData.nombre_completo,
+            name: finalUserData.nombre_completo,
             email: resolvedEmail,
-            phone: userData.contacto_emergencia_1_telefono || '',
+            phone: finalUserData.contacto_emergencia_1_telefono || '',
             city: 'Caracas',
             licenseNumber: 'MSAS-42.501',
             specialty: 'Medicina Crítica & Emergencias'
@@ -3409,16 +3459,16 @@ export default function App() {
       }
 
       try {
-        const dbRole = selectRole === 'lawyer' ? 'abogado' :
-                       selectRole === 'citizen' ? 'ciudadano' :
-                       selectRole === 'driver' ? 'conductor' :
-                       selectRole === 'ambulance' ? 'paramedico' :
-                       selectRole === 'medic' ? 'medico' : selectRole;
+        const dbRole = selectRole === 'lawyer' ? 'lawyer' :
+                       selectRole === 'citizen' ? 'citizen' :
+                       selectRole === 'driver' ? 'driver' :
+                       selectRole === 'ambulance' ? 'ambulance' :
+                       selectRole === 'medic' ? 'medic' : selectRole;
 
         const finalName = citizenProfile.name || 'Usuario SecureFlow';
         const finalPhone = citizenProfile.phone || '584241234567';
         const chosenRole = selectRole;
-        const rolSeleccionado = chosenRole === 'driver' ? 'gruero' : dbRole;
+        const rolSeleccionado = dbRole;
 
         const signupMetadata = {
           nombre_completo: finalName,
@@ -3651,16 +3701,16 @@ export default function App() {
           // If credentials do not exist, automatically transition to register mode to make it ultra-resilient
           console.log("No existing user found or invalid credentials on clean database. Autoprovisioning user profile on the fly...");
           try {
-            const dbRole = selectRole === 'lawyer' ? 'abogado' :
-                           selectRole === 'citizen' ? 'ciudadano' :
-                           selectRole === 'driver' ? 'conductor' :
-                           selectRole === 'ambulance' ? 'paramedico' :
-                           selectRole === 'medic' ? 'medico' : selectRole;
+            const dbRole = selectRole === 'lawyer' ? 'lawyer' :
+                           selectRole === 'citizen' ? 'citizen' :
+                           selectRole === 'driver' ? 'driver' :
+                           selectRole === 'ambulance' ? 'ambulance' :
+                           selectRole === 'medic' ? 'medic' : selectRole;
 
             const finalName = citizenProfile.name || 'Usuario SecureFlow';
             const finalPhone = citizenProfile.phone || '584241234567';
             const chosenRole = selectRole;
-            const rolSeleccionado = chosenRole === 'driver' ? 'gruero' : dbRole;
+            const rolSeleccionado = dbRole;
 
             const signupMetadata = {
               nombre_completo: finalName,

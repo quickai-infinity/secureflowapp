@@ -342,6 +342,76 @@ function RoadsideMap({ driverLat, driverLng, citizenLat, citizenLng }: { driverL
   );
 }
 
+const CitizenPendingTowLoader = ({ 
+  assistId, 
+  onActive, 
+  onCancel 
+}: { 
+  assistId: string, 
+  onActive: (updatedRow: any) => void, 
+  onCancel: () => void 
+}) => {
+  useEffect(() => {
+    console.log("[POLLING] Active for assistance ID:", assistId);
+    let isMounted = true;
+    const interval = setInterval(async () => {
+      try {
+        const { data, error } = await supabase
+          .from('asistencias_viales')
+          .select('*')
+          .eq('id', assistId)
+          .maybeSingle();
+        
+        if (!isMounted) return;
+
+        if (!error && data) {
+          console.log("[POLLING] Status check:", data.estado);
+          if (data.estado === 'activa' || data.estado === 'en_progreso' || data.estado === 'aceptado') {
+            console.log("[POLLING] Active/en_progreso/aceptado status found!", data);
+            clearInterval(interval);
+            onActive(data);
+          } else if (data.estado === 'completado' || data.estado === 'cancelado') {
+            console.log("[POLLING] Finished or canceled. Clearing interval.");
+            clearInterval(interval);
+            onCancel();
+          }
+        }
+      } catch (err) {
+        console.error("Polling error:", err);
+      }
+    }, 2000);
+
+    return () => {
+      console.log("[POLLING] Cleaning up loader interval.");
+      isMounted = false;
+      clearInterval(interval);
+    };
+  }, [assistId]);
+
+  return (
+    <div className="flex-1 flex flex-col justify-center items-center bg-slate-950 p-6 text-center space-y-6 animate-fade-in min-h-[500px]" id="citizen-searching-fullscreen">
+      <div className="w-24 h-24 bg-yellow-500/10 border border-yellow-500/30 rounded-full flex items-center justify-center animate-pulse">
+        <span className="text-4xl">🚜</span>
+      </div>
+      <div className="space-y-2">
+        <h3 className="text-lg font-black text-yellow-500 uppercase tracking-wide">Despachando Unidad...</h3>
+        <p className="text-xs text-slate-300 max-w-xs mx-auto leading-relaxed">
+          Hemos notificado al operador de grúa en zona. Esperando confirmación de disponibilidad para iniciar el traslado. (Sincronización GPS backup activa)
+        </p>
+      </div>
+      <div className="w-48 bg-slate-800 rounded-full h-1.5 relative overflow-hidden">
+        <div className="bg-yellow-500 h-full rounded-full animate-sweep" style={{ width: '40%' }} />
+      </div>
+      <button
+        onClick={onCancel}
+        className="bg-red-950/60 border border-red-500/20 hover:bg-red-900/40 text-red-400 px-6 py-2.5 rounded-xl text-xs font-bold uppercase transition-all select-none font-mono"
+      >
+        ❌ Cancelar Solicitud
+      </button>
+    </div>
+  );
+};
+
 export default function App() {
   // Navigation & Role states
   const [activeDevice, setActiveDevice] = useState<'citizen' | 'lawyer' | 'driver' | 'admin' | 'landing' | 'ambulance' | 'medic'>('landing');
@@ -3824,84 +3894,55 @@ export default function App() {
 
       if (insertedVialRow) {
         setActiveVialAssist(insertedVialRow);
-
-        console.log("Activating dynamic citizen listener for assisted vial row:", insertedVialRow.id);
-        const dynamicChannel = supabase
-          .channel(`tow-vial-direct-${insertedVialRow.id}`)
-          .on(
-            'postgres_changes',
-            {
-              event: 'UPDATE',
-              schema: 'public',
-              table: 'asistencias_viales',
-              filter: `id=eq.${insertedVialRow.id}`
-            },
-            async (payload) => {
-              console.log("Realtime direct status update detected for assist:", payload.new);
-              const updated = payload.new;
-              
-              if (updated.estado === 'activa' || updated.estado === 'en_progreso' || updated.estado === 'aceptado') {
-                // Recover driver details to enrich top summary
-                let drName = 'Carlos Ruiz';
-                let drPhone = 'No phone';
-                let vPlate = 'A92B45X';
-
-                if (updated.gruero_id) {
-                  const { data: grueroRow } = await supabase
-                    .from('grueros')
-                    .select('nombre_completo, telefono, placa_vehiculo')
-                    .eq('id', updated.gruero_id)
-                    .maybeSingle();
-                  if (grueroRow) {
-                    drName = grueroRow.nombre_completo;
-                    drPhone = grueroRow.telefono || drPhone;
-                    vPlate = grueroRow.placa_vehiculo || vPlate;
-                  }
-                }
-
-                // Immediate jump to Map (desmontado loading render and showing full tracks)
-                setTowState('dispatched');
-                setCitizenTab('home');
-
-                setActiveVialAssist(updated);
-                setActiveTowJob({
-                  id: updated.id,
-                  citizenName: citizenProfile.name || 'Ciudadano',
-                  citizenPhone: citizenProfile.phone || 'No phone',
-                  status: 'en_route',
-                  latitude: updated.ubicacion_origen_lat || citizenCoords.lat,
-                  longitude: updated.ubicacion_origen_lng || citizenCoords.lng,
-                  price: updated.costo_total,
-                  distance: updated.distancia_metros || 5400,
-                  driverName: drName,
-                  driverPhone: drPhone,
-                  vehiclePlate: vPlate,
-                  gruero_id: updated.gruero_id
-                });
-
-                showMaterialAlert('🚜 Operador en Camino', `El operador de grúa ${drName} con placa ${vPlate} ha aceptado tu solicitud de traslado en tiempo real.`);
-              } else if (updated.estado === 'completado') {
-                setTowState('idle');
-                setActiveTowJob(null);
-                setActiveVialAssist(null);
-                const rate = Number(updated.costo_total) || 28.50;
-                setCitizenBalance(b => Math.max(0, b - rate));
-                showMaterialAlert('🚜 Traslado Concluido', `La unidad de grúa ha completado el traslado con éxito. Se debitaron $${rate.toFixed(2)} USD de tu saldo del seguro.`);
-              } else if (updated.estado === 'cancelado') {
-                setTowState('idle');
-                setActiveTowJob(null);
-                setActiveVialAssist(null);
-                showMaterialAlert('🚜 Traslado Cancelado', 'El servicio de asistencia vial de grúa ha sido cancelado.');
-              }
-            }
-          )
-          .subscribe();
+        console.log("Successfully inserted asistencias_viales row. GPS polling backup active.");
       }
 
       triggerPush('🚜 Alerta Solicitud Grúa', 'Buscando unidad de grúa disponible en el sector...');
     } catch (e) {
       console.error("Error creating pending tow row in Supabase:", e);
     }
+  };
+
+  const handleOnTowRequestActivated = async (updated: any) => {
+    // Recover driver details to enrich top summary
+    let drName = 'Carlos Ruiz';
+    let drPhone = 'No phone';
+    let vPlate = 'A92B45X';
+
+    if (updated.gruero_id) {
+      const { data: grueroRow } = await supabase
+        .from('grueros')
+        .select('nombre_completo, telefono, placa_vehiculo')
+        .eq('id', updated.gruero_id)
+        .maybeSingle();
+      if (grueroRow) {
+        drName = grueroRow.nombre_completo;
+        drPhone = grueroRow.telefono || drPhone;
+        vPlate = grueroRow.placa_vehiculo || vPlate;
+      }
+    }
+
+    // Immediate jump to Map
+    setTowState('dispatched');
+    setCitizenTab('home');
+
+    setActiveVialAssist(updated);
+    setActiveTowJob({
+      id: updated.id,
+      citizenName: citizenProfile.name || 'Ciudadano',
+      citizenPhone: citizenProfile.phone || 'No phone',
+      status: 'en_route',
+      latitude: updated.ubicacion_origen_lat || citizenCoords.lat,
+      longitude: updated.ubicacion_origen_lng || citizenCoords.lng,
+      price: updated.costo_total,
+      distance: updated.distancia_metros || 5400,
+      driverName: drName,
+      driverPhone: drPhone,
+      vehiclePlate: vPlate,
+      gruero_id: updated.gruero_id
+    });
+
+    showMaterialAlert('🚜 Operador en Camino', `El operador de grúa ${drName} con placa ${vPlate} ha aceptado tu solicitud de traslado en tiempo real.`);
   };
 
   const handleCancelTowRequest = async () => {
@@ -5390,29 +5431,11 @@ export default function App() {
 
                 if (activeAssistance && activeAssistance.estado === 'pendiente') {
                   return (
-                    <div className="flex-1 flex flex-col justify-center items-center bg-slate-950 p-6 text-center space-y-6 animate-fade-in min-h-[500px]" id="citizen-searching-fullscreen">
-                      <div className="w-24 h-24 bg-yellow-500/10 border border-yellow-500/30 rounded-full flex items-center justify-center animate-pulse">
-                        <span className="text-4xl">🚜</span>
-                      </div>
-                      <div className="space-y-2">
-                        <h3 className="text-lg font-black text-yellow-500 uppercase tracking-wide">Despachando Unidad...</h3>
-                        <p className="text-xs text-slate-300 max-w-xs mx-auto leading-relaxed">
-                          Hemos notificado al operador de grúa en zona. Esperando confirmación de disponibilidad para iniciar el traslado.
-                        </p>
-                      </div>
-                      <div className="w-48 bg-slate-800 rounded-full h-1.5 relative overflow-hidden">
-                        <div className="bg-yellow-500 h-full rounded-full animate-sweep" style={{ width: '40%' }} />
-                      </div>
-                      <button
-                        onClick={() => {
-                          showMaterialAlert('Cancelando Asistencia', 'Procediendo a cancelar despacho vial...');
-                          handleCancelTowRequest();
-                        }}
-                        className="bg-red-950/60 border border-red-500/20 hover:bg-red-900/40 text-red-400 px-6 py-2.5 rounded-xl text-xs font-bold uppercase transition-all select-none font-mono"
-                      >
-                        ❌ Cancelar Solicitud
-                      </button>
-                    </div>
+                    <CitizenPendingTowLoader 
+                      assistId={activeAssistance.id}
+                      onActive={handleOnTowRequestActivated}
+                      onCancel={handleCancelTowRequest}
+                    />
                   );
                 }
 
@@ -5602,29 +5625,11 @@ export default function App() {
                       // CONDICIÓN B: Buscando Grúa -> Pantalla de carga completa de 'Despachando Unidad...'
                       if (activeAssistance && activeAssistance.estado === 'pendiente') {
                         return (
-                          <div className="absolute inset-0 z-50 bg-slate-950 flex flex-col justify-center items-center p-6 text-center space-y-6 animate-fade-in" id="citizen-searching-fullscreen">
-                            <div className="w-24 h-24 bg-yellow-500/10 border border-yellow-500/30 rounded-full flex items-center justify-center animate-pulse">
-                              <span className="text-4xl">🚜</span>
-                            </div>
-                            <div className="space-y-2">
-                              <h3 className="text-lg font-black text-yellow-500 uppercase tracking-wide">Despachando Unidad Vial...</h3>
-                              <p className="text-xs text-slate-300 max-w-xs mx-auto leading-relaxed">
-                                Hemos notificado al operador de grúa en zona. Esperando confirmación de disponibilidad para iniciar el traslado.
-                              </p>
-                            </div>
-                            <div className="w-48 bg-slate-800 rounded-full h-1.5 relative overflow-hidden">
-                              <div className="bg-yellow-500 h-full rounded-full animate-sweep" style={{ width: '40%' }} />
-                            </div>
-                            <button
-                              onClick={() => {
-                                showMaterialAlert('Cancelando Asistencia', 'Procediendo a cancelar despacho vial...');
-                                handleCancelTowRequest();
-                              }}
-                              className="bg-red-950/60 border border-red-500/20 hover:bg-red-900/40 text-red-400 px-6 py-2.5 rounded-xl text-xs font-bold uppercase transition-all select-none font-mono"
-                            >
-                              ❌ Cancelar Solicitud
-                            </button>
-                          </div>
+                          <CitizenPendingTowLoader 
+                            assistId={activeAssistance.id}
+                            onActive={handleOnTowRequestActivated}
+                            onCancel={handleCancelTowRequest}
+                          />
                         );
                       }
 

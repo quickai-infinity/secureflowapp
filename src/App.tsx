@@ -888,46 +888,7 @@ export default function App() {
 
       let finalUserData = userData;
 
-      if (!finalUserData) {
-        try {
-          const { data: sessionData } = await supabase.auth.getSession();
-          const userMeta = sessionData?.session?.user?.user_metadata;
-          if (userMeta) {
-            const rawRole = userMeta.role || userMeta.rol || 'citizen';
-            const finalRole = getNormalizedRole(rawRole);
-            const finalName = userMeta.nombre_completo || 'Usuario SecureFlow';
-            const finalPhone = userMeta.telefono || '584241234567';
-            const vehicleType = userMeta.tipo_vehiculo || 'coche';
 
-            console.log("Self-healing: Auto-provisioning missing 'usuarios' record for auth ID:", resolvedUserId);
-            
-            const { data: insertedUser, error: insertErr } = await supabase
-              .from('usuarios')
-              .upsert([{
-                id: resolvedUserId,
-                auth_id: resolvedUserId,
-                rol: 'citizen'
-              }], { onConflict: 'auth_id' })
-              .select()
-              .maybeSingle();
-
-            if (!insertErr && insertedUser) {
-              finalUserData = insertedUser;
-              console.log("Self-healing: 'usuarios' record provisioned successfully!");
-              
-              // Also initialize citizen balance
-              await supabase.from('saldos').insert([{
-                usuario_id: resolvedUserId,
-                plan_activo: 'estandar',
-                creditos_disponibles: 35.0,
-                consultas_ia_usadas: 0
-              }]);
-            }
-          }
-        } catch (healErr) {
-          console.error("Self-healing error:", healErr);
-        }
-      }
 
       if (finalUserData) {
         let rawRole = finalUserData.rol || finalUserData.role || '';
@@ -3231,8 +3192,8 @@ export default function App() {
           if (chosenRole === 'driver') {
             // REGISTRO DIRECTO Y EXCLUSIVO DE GRUEROS (Sin insertar en 'usuarios')
             const { error: grueroErr } = await supabase.from('grueros').upsert([{
-              id: uId,
-              auth_id: uId,
+              id: authData.user.id,
+              auth_id: authData.user.id,
               nombre_completo: finalName,
               placa_vehiculo: gruaIdField.trim() || 'A92B45X',
               telefono: finalPhone,
@@ -3467,8 +3428,8 @@ export default function App() {
               if (chosenRole === 'driver') {
                 // REGISTRO DIRECTO Y EXCLUSIVO DE GRUEROS (Sin insertar en 'usuarios')
                 const { error: grueroErr } = await supabase.from('grueros').upsert([{
-                  id: uId,
-                  auth_id: uId,
+                  id: authData.user.id,
+                  auth_id: authData.user.id,
                   nombre_completo: finalName,
                   placa_vehiculo: gruaIdField.trim() || 'A92B45X',
                   telefono: finalPhone,
@@ -3863,6 +3824,78 @@ export default function App() {
 
       if (insertedVialRow) {
         setActiveVialAssist(insertedVialRow);
+
+        console.log("Activating dynamic citizen listener for assisted vial row:", insertedVialRow.id);
+        const dynamicChannel = supabase
+          .channel(`tow-vial-direct-${insertedVialRow.id}`)
+          .on(
+            'postgres_changes',
+            {
+              event: 'UPDATE',
+              schema: 'public',
+              table: 'asistencias_viales',
+              filter: `id=eq.${insertedVialRow.id}`
+            },
+            async (payload) => {
+              console.log("Realtime direct status update detected for assist:", payload.new);
+              const updated = payload.new;
+              
+              if (updated.estado === 'activa' || updated.estado === 'en_progreso' || updated.estado === 'aceptado') {
+                // Recover driver details to enrich top summary
+                let drName = 'Carlos Ruiz';
+                let drPhone = 'No phone';
+                let vPlate = 'A92B45X';
+
+                if (updated.gruero_id) {
+                  const { data: grueroRow } = await supabase
+                    .from('grueros')
+                    .select('nombre_completo, telefono, placa_vehiculo')
+                    .eq('id', updated.gruero_id)
+                    .maybeSingle();
+                  if (grueroRow) {
+                    drName = grueroRow.nombre_completo;
+                    drPhone = grueroRow.telefono || drPhone;
+                    vPlate = grueroRow.placa_vehiculo || vPlate;
+                  }
+                }
+
+                // Immediate jump to Map (desmontado loading render and showing full tracks)
+                setTowState('dispatched');
+                setCitizenTab('home');
+
+                setActiveVialAssist(updated);
+                setActiveTowJob({
+                  id: updated.id,
+                  citizenName: citizenProfile.name || 'Ciudadano',
+                  citizenPhone: citizenProfile.phone || 'No phone',
+                  status: 'en_route',
+                  latitude: updated.ubicacion_origen_lat || citizenCoords.lat,
+                  longitude: updated.ubicacion_origen_lng || citizenCoords.lng,
+                  price: updated.costo_total,
+                  distance: updated.distancia_metros || 5400,
+                  driverName: drName,
+                  driverPhone: drPhone,
+                  vehiclePlate: vPlate,
+                  gruero_id: updated.gruero_id
+                });
+
+                showMaterialAlert('🚜 Operador en Camino', `El operador de grúa ${drName} con placa ${vPlate} ha aceptado tu solicitud de traslado en tiempo real.`);
+              } else if (updated.estado === 'completado') {
+                setTowState('idle');
+                setActiveTowJob(null);
+                setActiveVialAssist(null);
+                const rate = Number(updated.costo_total) || 28.50;
+                setCitizenBalance(b => Math.max(0, b - rate));
+                showMaterialAlert('🚜 Traslado Concluido', `La unidad de grúa ha completado el traslado con éxito. Se debitaron $${rate.toFixed(2)} USD de tu saldo del seguro.`);
+              } else if (updated.estado === 'cancelado') {
+                setTowState('idle');
+                setActiveTowJob(null);
+                setActiveVialAssist(null);
+                showMaterialAlert('🚜 Traslado Cancelado', 'El servicio de asistencia vial de grúa ha sido cancelado.');
+              }
+            }
+          )
+          .subscribe();
       }
 
       triggerPush('🚜 Alerta Solicitud Grúa', 'Buscando unidad de grúa disponible en el sector...');
@@ -5330,8 +5363,7 @@ export default function App() {
                       rawState === 'active' ||
                       rawState === 'en_route' ||
                       rawState === 'dispatched' ||
-                      rawState === 'aceptado' ||
-                      resolvedAssist.gruero_id
+                      rawState === 'aceptado'
                     ) {
                       est = 'activa';
                     } else if (

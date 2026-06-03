@@ -903,18 +903,13 @@ export default function App() {
             
             const { data: insertedUser, error: insertErr } = await supabase
               .from('usuarios')
-              .insert([{
+              .upsert([{
                 id: resolvedUserId,
                 auth_id: resolvedUserId,
                 rol: finalRole,
-                role: finalRole,
                 nombre_completo: finalName,
-                telefono: finalPhone,
-                cedula: userMeta.cedula || 'V-12.345.678',
-                email: resolvedEmail,
-                tipo_vehiculo: vehicleType,
-                vehicle_selection: vehicleType
-              }])
+                tipo_vehiculo: (vehicleType === 'moto' || vehicleType === 'coche') ? vehicleType : 'coche'
+              }], { onConflict: 'auth_id' })
               .select()
               .maybeSingle();
 
@@ -3553,13 +3548,8 @@ export default function App() {
               id: uId,
               auth_id: uId,
               rol: rolSeleccionado,
-              role: rolSeleccionado,
               nombre_completo: finalName,
-              telefono: finalPhone,
-              cedula: ciudadanoIdField || '',
-              email: authEmail.trim(),
               tipo_vehiculo: chosenRole === 'citizen' ? citizenVehicleType : null,
-              vehicle_selection: chosenRole === 'citizen' ? citizenVehicleType : null,
               contacto_emergencia_1_nombre: alertContacts.name1 || 'Mi Madre',
               contacto_emergencia_1_telefono: alertContacts.tel1 || '584249998877',
               contacto_emergencia_2_nombre: alertContacts.name2 || 'Mi Hermano',
@@ -3794,13 +3784,8 @@ export default function App() {
                   id: uId,
                   auth_id: uId,
                   rol: rolSeleccionado,
-                  role: rolSeleccionado,
                   nombre_completo: finalName,
-                  telefono: finalPhone,
-                  cedula: ciudadanoIdField || 'V-12.345.678',
-                  email: authEmail.trim(),
                   tipo_vehiculo: chosenRole === 'citizen' ? citizenVehicleType : null,
-                  vehicle_selection: chosenRole === 'citizen' ? citizenVehicleType : null,
                   contacto_emergencia_1_nombre: alertContacts.name1 || 'Mi Madre',
                   contacto_emergencia_1_telefono: alertContacts.tel1 || '584249998877',
                   contacto_emergencia_2_nombre: alertContacts.name2 || 'Mi Hermano',
@@ -5655,324 +5640,362 @@ export default function App() {
                     
                     {/* TAB CITIZEN HOME */}
                     {citizenTab === 'home' && (() => {
-                      const isCitizenTowActive = !!activeTowJob && (
-                        towState === 'dispatched' || 
-                        activeTowJob.status === 'en_route' || 
-                        activeTowJob.status === 'active' || 
-                        activeTowJob.gruero_id || 
-                        activeVialAssist?.estado === 'activa' || 
-                        activeVialAssist?.estado === 'en_progreso' || 
-                        activeVialAssist?.gruero_id
-                      );
+                      const activeAssistance = (() => {
+                        const resolvedAssist = activeVialAssist || activeTowJob;
+                        if (!resolvedAssist) return null;
+
+                        const rawState = resolvedAssist.estado || resolvedAssist.status || (towState === 'idle' ? null : towState);
+                        if (!rawState) return null;
+
+                        if (rawState === 'completed' || rawState === 'cancelado' || rawState === 'completado' || rawState === 'idle') {
+                          return null;
+                        }
+
+                        let est = 'pendiente';
+                        if (
+                          rawState === 'activa' ||
+                          rawState === 'en_progreso' ||
+                          rawState === 'active' ||
+                          rawState === 'en_route' ||
+                          rawState === 'dispatched' ||
+                          rawState === 'aceptado' ||
+                          resolvedAssist.gruero_id
+                        ) {
+                          est = 'activa';
+                        } else if (
+                          rawState === 'pendiente' ||
+                          rawState === 'pending' ||
+                          rawState === 'proposed'
+                        ) {
+                          est = 'pendiente';
+                        }
+
+                        return {
+                          id: resolvedAssist.id,
+                          estado: est,
+                          driverName: resolvedAssist.driverName || 'Operador de Guardia',
+                          driverPhone: resolvedAssist.driverPhone,
+                          vehiclePlate: resolvedAssist.vehiclePlate || 'A92B45X',
+                          price: resolvedAssist.price || resolvedAssist.costo_total,
+                          distance: resolvedAssist.distance || resolvedAssist.distancia_metros,
+                          latitude: resolvedAssist.latitude || resolvedAssist.ubicacion_origen_lat,
+                          longitude: resolvedAssist.longitude || resolvedAssist.ubicacion_origen_lng
+                        };
+                      })();
+
+                      // CONDICIÓN B: Buscando Grúa -> Pantalla de carga completa de 'Despachando Unidad...'
+                      if (activeAssistance && activeAssistance.estado === 'pendiente') {
+                        return (
+                          <div className="absolute inset-0 z-50 bg-slate-950 flex flex-col justify-center items-center p-6 text-center space-y-6 animate-fade-in" id="citizen-searching-fullscreen">
+                            <div className="w-24 h-24 bg-yellow-500/10 border border-yellow-500/30 rounded-full flex items-center justify-center animate-pulse">
+                              <span className="text-4xl">🚜</span>
+                            </div>
+                            <div className="space-y-2">
+                              <h3 className="text-lg font-black text-yellow-500 uppercase tracking-wide">Despachando Unidad Vial...</h3>
+                              <p className="text-xs text-slate-300 max-w-xs mx-auto leading-relaxed">
+                                Hemos notificado al operador de grúa en zona. Esperando confirmación de disponibilidad para iniciar el traslado.
+                              </p>
+                            </div>
+                            <div className="w-48 bg-slate-800 rounded-full h-1.5 relative overflow-hidden">
+                              <div className="bg-yellow-500 h-full rounded-full animate-sweep" style={{ width: '40%' }} />
+                            </div>
+                            <button
+                              onClick={() => {
+                                showMaterialAlert('Cancelando Asistencia', 'Procediendo a cancelar despacho vial...');
+                                handleCancelTowRequest();
+                              }}
+                              className="bg-red-950/60 border border-red-500/20 hover:bg-red-900/40 text-red-400 px-6 py-2.5 rounded-xl text-xs font-bold uppercase transition-all select-none font-mono"
+                            >
+                              ❌ Cancelar Solicitud
+                            </button>
+                          </div>
+                        );
+                      }
+
+                      // CONDICIÓN C: Viaje Aceptado -> Retorna SOLO el componente <RoadsideMap /> a pantalla completa. Desmonta todo lo demás.
+                      if (activeAssistance && (activeAssistance.estado === 'activa' || activeAssistance.estado === 'en_progreso')) {
+                        return (
+                          <div className="absolute inset-0 z-50 bg-slate-950 flex flex-col justify-stretch overflow-hidden animate-fade-in" id="citizen-active-tracking-fullscreen">
+                            {/* Live road tracking map */}
+                            {craneUnitState?.lat_actual && craneUnitState?.lng_actual && (activeAssistance?.latitude || citizenCoords.lat) && (activeAssistance?.longitude || citizenCoords.lng) ? (
+                              <div className="absolute inset-0 z-0">
+                                <RoadsideMap
+                                  driverLat={craneUnitState.lat_actual}
+                                  driverLng={craneUnitState.lng_actual}
+                                  citizenLat={activeAssistance?.latitude || citizenCoords.lat}
+                                  citizenLng={activeAssistance?.longitude || citizenCoords.lng}
+                                />
+                              </div>
+                            ) : (
+                              <div className="absolute inset-0 bg-slate-950 flex flex-col justify-center items-center p-3 text-center space-y-1 z-0">
+                                <span className="text-xl animate-spin text-indigo-400">📡</span>
+                                <span className="text-[10px] text-slate-400 font-bold uppercase tracking-wide">Sincronizando señal GPS de la Grúa...</span>
+                              </div>
+                            )}
+
+                            {/* Floating overlays over map: info box, total visual destruction of coexistence Custom */}
+                            <div className="absolute bottom-4 left-4 right-4 z-10 space-y-3 pointer-events-none animate-slide-up" id="floating-live-panel-fullscreen">
+                              
+                              {/* Driver card */}
+                              <div className="bg-slate-900/95 backdrop-blur-md rounded-2xl p-4 border border-indigo-500/20 shadow-2xl pointer-events-auto text-left">
+                                <div className="flex justify-between items-center mb-3">
+                                  <div className="text-left">
+                                    <span className="text-[10px] font-bold text-indigo-400 font-mono tracking-widest uppercase animate-pulse block">🚜 GRÚA EN RUTA</span>
+                                    <h3 className="text-xs font-black text-white mt-1">Conductor: {activeAssistance.driverName || 'Operador de Guardia'}</h3>
+                                    <div className="flex items-center gap-2 mt-1">
+                                      {activeAssistance.driverPhone && (
+                                        <span className="text-[10px] text-slate-400 font-mono">{activeAssistance.driverPhone}</span>
+                                      )}
+                                      <span className="text-[9px] bg-indigo-900 text-yellow-400 px-1.5 py-0.5 rounded font-bold uppercase tracking-wider border border-yellow-500/30">
+                                        Placa: {activeAssistance.vehiclePlate || 'A92B45X'}
+                                      </span>
+                                    </div>
+                                  </div>
+                                  <span className="text-[10px] bg-indigo-900/40 text-indigo-200 px-2 py-1 rounded-lg border border-indigo-500/10 font-mono self-start shrink-0">
+                                    ETA • {Math.ceil((activeAssistance.distance || 5400) / 150) || 5} min
+                                  </span>
+                                </div>
+
+                                {/* Pricing Breakdown */}
+                                <div className="bg-slate-950/80 p-3 rounded-xl border border-white/5 text-[9.5px] space-y-1 font-mono mb-3">
+                                  {(() => {
+                                    const distKm = (activeAssistance.distance || 5400) / 1000;
+                                    const baseFee = tariffs.grua?.tarifa_base ?? 30.00;
+                                    const kmRate = tariffs.grua?.precio_por_km ?? 4.50;
+                                    const costKm = distKm * kmRate;
+                                    const totalCalculated = baseFee + costKm;
+                                    return (
+                                      <>
+                                        <div className="flex justify-between text-slate-400">
+                                          <span>Tarifa Base:</span>
+                                          <span>$ {baseFee.toFixed(2)} USD</span>
+                                        </div>
+                                        <div className="flex justify-between text-slate-400">
+                                          <span>Precio por Km:</span>
+                                          <span>$ {kmRate.toFixed(2)} USD</span>
+                                        </div>
+                                        <div className="flex justify-between text-slate-400">
+                                          <span>Distancia:</span>
+                                          <span>{distKm.toFixed(2)} Km ({costKm.toFixed(2)} USD)</span>
+                                        </div>
+                                        <div className="flex justify-between border-t border-white/5 pt-1.5 font-sans font-bold text-xs mt-1 text-red-400">
+                                          <span>Costo Total:</span>
+                                          <span>$ {totalCalculated.toFixed(2)} USD</span>
+                                        </div>
+                                      </>
+                                    );
+                                  })()}
+                                </div>
+
+                                <div className="flex gap-2">
+                                  <button 
+                                    onClick={() => {
+                                      showMaterialAlert('Cancelando Asistencia', 'Procediendo a cancelar despacho vial...');
+                                      handleCancelTowRequest();
+                                    }}
+                                    className="bg-red-950/60 border border-red-500/20 hover:bg-red-900/40 text-red-005 px-4 py-2.5 rounded-xl text-xs font-bold uppercase transition-all select-none font-mono text-red-400"
+                                  >
+                                    Cancelar
+                                  </button>
+                                  <button 
+                                    onClick={() => {
+                                      setCitizenTab('agent');
+                                    }}
+                                    className="flex-1 bg-indigo-650 hover:bg-indigo-600 text-white py-2.5 rounded-xl text-xs font-black tracking-wide transition-all text-center uppercase shadow-lg select-none"
+                                  >
+                                    💬 Mensajes con Grúa
+                                  </button>
+                                  <button 
+                                    onClick={() => {
+                                      setIsTowDailyCoActive(!isTowDailyCoActive);
+                                      const webrtcUrl = activeVialAssist?.sala_webrtc_url || (activeTowJob ? "https://iframe.daily.co/secureflow-tow-" + activeTowJob.id : "");
+                                      setTowDailyCoUrl(webrtcUrl);
+                                    }}
+                                    className="bg-slate-800 hover:bg-slate-755 text-indigo-300 px-3.5 py-2.5 rounded-xl text-xs font-bold border border-white/5 transition-all uppercase flex items-center justify-center gap-1"
+                                  >
+                                    📹 {isTowDailyCoActive ? 'Ocultar' : 'Video WebRTC'}
+                                  </button>
+                                </div>
+                              </div>
+                            </div>
+                          </div>
+                        );
+                      }
+
+                      // CONDICIÓN A: Sin emergencia -> Retorna SOLO el dashboard principal (Botón SOS, módulos corporativos). NADA MÁS.
                       return (
                         <div className="p-4 space-y-4">
-                          {isCitizenTowActive ? (
-                            /* PANTALLA COMPLETA DE SEGUIMIENTO EN VIVO SEGÚN REGLA ESTRICTA DE LA MÁQUINA DE ESTADOS */
-                            <div className="absolute inset-0 z-50 bg-slate-950 flex flex-col justify-stretch overflow-hidden animate-fade-in" id="citizen-active-tracking-fullscreen">
-                              {/* Live road tracking map */}
-                              {craneUnitState?.lat_actual && craneUnitState?.lng_actual && (activeTowJob?.latitude || citizenCoords.lat) && (activeTowJob?.longitude || citizenCoords.lng) ? (
-                                <div className="absolute inset-0 z-0">
-                                  <RoadsideMap
-                                    driverLat={craneUnitState.lat_actual}
-                                    driverLng={craneUnitState.lng_actual}
-                                    citizenLat={activeTowJob?.latitude || citizenCoords.lat}
-                                    citizenLng={activeTowJob?.longitude || citizenCoords.lng}
-                                  />
-                                </div>
-                              ) : (
-                                <div className="absolute inset-0 bg-slate-950 flex flex-col justify-center items-center p-3 text-center space-y-1 z-0">
-                                  <span className="text-xl animate-spin text-indigo-400">📡</span>
-                                  <span className="text-[10px] text-slate-400 font-bold uppercase tracking-wide">Sincronizando señal GPS de la Grúa...</span>
-                                </div>
-                              )}
+                          {/* Welcome header in MD3 */}
+                          <div className="text-left mt-1.5">
+                            <h2 className="text-lg font-black text-white leading-tight">Hola, {citizenProfile.name.split(' ')[0]}</h2>
+                            <p className="text-[11px] text-slate-400 mt-0.5">En incidentes de tránsito o accidentes, mantén la calma.</p>
+                          </div>
 
-                              {/* Floating overlays over map: info box, total visual destruction of coexistence Custom */}
-                              <div className="absolute bottom-4 left-4 right-4 z-10 space-y-3 pointer-events-none animate-slide-up" id="floating-live-panel-fullscreen">
-                                
-                                {/* Driver card */}
-                                <div className="bg-slate-900/95 backdrop-blur-md rounded-2xl p-4 border border-indigo-500/20 shadow-2xl pointer-events-auto text-left">
-                                  <div className="flex justify-between items-center mb-3">
-                                    <div className="text-left">
-                                      <span className="text-[10px] font-bold text-indigo-400 font-mono tracking-widest uppercase animate-pulse block">🚜 GRÚA EN RUTA</span>
-                                      <h3 className="text-xs font-black text-white mt-1">Conductor: {activeTowJob.driverName || 'Operador de Guardia'}</h3>
-                                      <div className="flex items-center gap-2 mt-1">
-                                        {activeTowJob.driverPhone && (
-                                          <span className="text-[10px] text-slate-400 font-mono">{activeTowJob.driverPhone}</span>
-                                        )}
-                                        <span className="text-[9px] bg-indigo-900 text-yellow-400 px-1.5 py-0.5 rounded font-bold uppercase tracking-wider border border-yellow-500/30">
-                                          Placa: {activeTowJob.vehiclePlate || 'A92B45X'}
-                                        </span>
-                                      </div>
-                                    </div>
-                                    <span className="text-[10px] bg-indigo-900/40 text-indigo-200 px-2 py-1 rounded-lg border border-indigo-500/10 font-mono self-start shrink-0">
-                                      ETA • {Math.ceil((activeTowJob.distance || 5400) / 150) || 5} min
-                                    </span>
-                                  </div>
-
-                                  {/* Pricing Breakdown */}
-                                  <div className="bg-slate-950/80 p-3 rounded-xl border border-white/5 text-[9.5px] space-y-1 font-mono mb-3">
-                                    {(() => {
-                                      const distKm = (activeTowJob.distance || 5400) / 1000;
-                                      const baseFee = tariffs.grua?.tarifa_base ?? 30.00;
-                                      const kmRate = tariffs.grua?.precio_por_km ?? 4.50;
-                                      const costKm = distKm * kmRate;
-                                      const totalCalculated = baseFee + costKm;
-                                      return (
-                                        <>
-                                          <div className="flex justify-between text-slate-400">
-                                            <span>Tarifa Base:</span>
-                                            <span>$ {baseFee.toFixed(2)} USD</span>
-                                          </div>
-                                          <div className="flex justify-between text-slate-400">
-                                            <span>Precio por Km:</span>
-                                            <span>$ {kmRate.toFixed(2)} USD</span>
-                                          </div>
-                                          <div className="flex justify-between text-slate-400">
-                                            <span>Distancia:</span>
-                                            <span>{distKm.toFixed(2)} Km ({costKm.toFixed(2)} USD)</span>
-                                          </div>
-                                          <div className="flex justify-between border-t border-white/5 pt-1.5 font-sans font-bold text-xs mt-1 text-red-400">
-                                            <span>Costo Total:</span>
-                                            <span>$ {totalCalculated.toFixed(2)} USD</span>
-                                          </div>
-                                        </>
-                                      );
-                                    })()}
-                                  </div>
-
-                                  <div className="flex gap-2">
-                                    <button 
-                                      onClick={() => {
-                                        showMaterialAlert('Cancelando Asistencia', 'Procediendo a cancelar despacho vial...');
-                                        handleCancelTowRequest();
-                                      }}
-                                      className="bg-red-950/60 border border-red-500/20 hover:bg-red-900/40 text-red-005 px-4 py-2.5 rounded-xl text-xs font-bold uppercase transition-all select-none font-mono text-red-400"
-                                    >
-                                      Cancelar
-                                    </button>
-                                    <button 
-                                      onClick={() => {
-                                        setCitizenTab('agent');
-                                      }}
-                                      className="flex-1 bg-indigo-650 hover:bg-indigo-600 text-white py-2.5 rounded-xl text-xs font-black tracking-wide transition-all text-center uppercase shadow-lg select-none"
-                                    >
-                                      💬 Mensajes con Grúa
-                                    </button>
-                                    <button 
-                                      onClick={() => {
-                                        setIsTowDailyCoActive(!isTowDailyCoActive);
-                                        const webrtcUrl = activeVialAssist?.sala_webrtc_url || (activeTowJob ? "https://iframe.daily.co/secureflow-tow-" + activeTowJob.id : "");
-                                        setTowDailyCoUrl(webrtcUrl);
-                                      }}
-                                      className="bg-slate-800 hover:bg-slate-755 text-indigo-300 px-3.5 py-2.5 rounded-xl text-xs font-bold border border-white/5 transition-all uppercase flex items-center justify-center gap-1"
-                                    >
-                                      📹 {isTowDailyCoActive ? 'Ocultar' : 'Video WebRTC'}
-                                    </button>
-                                  </div>
-                                </div>
-                              </div>
-
-                            </div>
-                          ) : (
-                          <>
-                            {/* Welcome header in MD3 */}
-                            <div className="text-left mt-1.5">
-                              <h2 className="text-lg font-black text-white leading-tight">Hola, {citizenProfile.name.split(' ')[0]}</h2>
-                              <p className="text-[11px] text-slate-400 mt-0.5">En incidentes de tránsito o accidentes, mantén la calma.</p>
-                            </div>
-
-                            {/* Interactive dynamic TOW tracking map */}
-                            {towState === 'proposed' && activeTowJob && (
-                              <div className="p-4 bg-yellow-500/10 border border-yellow-500/30 rounded-2xl space-y-3 text-center animate-pulse">
-                                <div className="flex justify-between items-center text-[9px] text-yellow-500/60 font-mono">
-                                  <span>ORDEN DE DESPACHO</span>
-                                  <span>ID: {activeTowJob.id.substring(0, 8).toUpperCase()}</span>
-                                </div>
-                                <span className="text-2xl block">🚜</span>
-                                <span className="text-xs text-yellow-550 font-black block uppercase">Despachando Unidad Vial...</span>
-                                <p className="text-[10px] text-slate-300">
-                                  Hemos notificado al operador de grúa en zona. Esperando confirmación de {activeTowJob.driverName || 'Carlos Ruiz'}. Puedes activar el canal de grúa para ver status.
-                                </p>
-                                <div className="w-full bg-slate-800 rounded-full h-1 relative overflow-hidden">
-                                  <div className="bg-yellow-500 h-full rounded-full animate-sweep" style={{ width: '40%' }} />
-                                </div>
-                                <button
-                                  onClick={handleCancelTowRequest}
-                                  className="w-full bg-red-500/20 hover:bg-red-500/35 border border-red-500/30 text-red-500 py-1.5 rounded-xl text-[10px] font-bold uppercase tracking-wider transition-all select-none"
-                                >
-                                  ❌ Cancelar Solicitud
-                                </button>
-                              </div>
-                            )}
-
-                            {/* Interactive dynamic AMBULANCE tracking card */}
-                            {ambulanceState === 'proposed' && activeAmbulanceJob && (
-                              <div className="p-4 bg-red-500/10 border border-red-500/30 rounded-2xl space-y-3 text-center animate-pulse">
-                                <span className="text-2xl block animate-bounce">🚑</span>
-                                <span className="text-xs text-red-400 font-extrabold block uppercase">Solicitud de Ambulancia de Guardia</span>
-                                <p className="text-[10px] text-slate-300">
-                                  Esperando que la unidad paramédica de resguardo SecureFlow confirme tu despacho físico. Por favor, mantente a la espera.
-                                </p>
-                                <div className="w-full bg-slate-800 rounded-full h-1 relative overflow-hidden">
-                                  <div className="bg-red-500 h-full rounded-full animate-sweep" style={{ width: '40%' }} />
-                                </div>
-                              </div>
-                            )}
-
-                            {/* Interactive dynamic MEDIC consultation card */}
-                            {medicState === 'calling' && activeMedicEmergency && (
-                              <div className="p-4 bg-emerald-500/10 border border-emerald-500/30 rounded-2xl space-y-3 text-center animate-pulse">
-                                <span className="text-2xl block animate-bounce">🏥</span>
-                                <span className="text-xs text-emerald-400 font-extrabold block uppercase">Solicitando Doctor de Guardia</span>
-                                <p className="text-[10px] text-slate-300">
-                                  Esperando que el médico cirujano de guardia reciba y acepte tu llamada de teleconsulta. No cierres la aplicación.
-                                </p>
-                                <div className="w-full bg-slate-800 rounded-full h-1 relative overflow-hidden">
-                                  <div className="bg-emerald-500 h-full rounded-full animate-sweep" style={{ width: '40%' }} />
-                                </div>
-                              </div>
-                            )}
-
-                            {sosState === 'calling' && (
-                              <div className="p-4 bg-amber-500/10 border border-amber-500/30 rounded-2xl text-center space-y-2 animate-pulse mb-3">
-                                <span className="text-xl block animate-bounce">⚖️</span>
-                                <span className="text-xs text-amber-400 font-extrabold block uppercase">Buscando Abogado Penalista...</span>
-                                <p className="text-[10px] text-slate-300 leading-normal">
-                                  Estamos enlazando tu ubicación y requerimiento SOS con la central de defensas viales en vivo. Por favor espera a que un profesional de guardia tome el control.
-                                </p>
-                              </div>
-                            )}
-
-                            {/* Core Emergency SOS Glowing Button */}
-                            <div className="p-5 bg-immersive-card border border-white/5 rounded-3xl text-center shadow-md relative overflow-hidden">
-                              <div className="absolute inset-0 bg-gradient-to-b from-rose-950/10 to-transparent" />
-                              <h4 className="text-xs font-extrabold text-slate-300 tracking-wide uppercase mb-3">Defensa Penal en Caliente</h4>
-                              
-                              {/* Active breath circular element */}
-                              <div className="relative py-4 flex justify-center">
-                                <button 
-                                  onClick={handleSosTrigger}
-                                  className={`w-36 h-36 rounded-full flex flex-col items-center justify-center text-white cursor-pointer select-none transition-all active:scale-90 ${sosState !== 'idle' ? 'bg-gradient-to-tr from-amber-600 to-amber-500 animate-pulse' : 'bg-gradient-to-tr from-red-650 to-red-500 glow-blue animate-pulse-glow'}`}
-                                >
-                                  <span className="text-3xl">🛡️</span>
-                                  <span className="text-xl font-black mt-1 font-mono tracking-tighter">
-                                    {sosState === 'idle' ? 'SOS' : 'SOS ACTIVO'}
-                                  </span>
-                                  <span className="text-[10px] font-bold uppercase text-rose-100 opacity-90 mt-0.5">
-                                    {sosState === 'idle' ? 'TOCA PARA DEFENSA' : 'CONECTANDO'}
-                                  </span>
-                                </button>
-                              </div>
-    
-                              <p className="text-[10px] text-slate-400 leading-relaxed mt-2.5 px-3">
-                                Encuentros en retenes o alcabalas. Videollamada de defensa legal auditada y almacenada en la Nube de Seguridad.
+                          {/* Quick checking other states if any (ambulance, medic, sos search) */}
+                          {ambulanceState === 'proposed' && activeAmbulanceJob && (
+                            <div className="p-4 bg-red-500/10 border border-red-500/30 rounded-2xl space-y-3 text-center animate-pulse">
+                              <span className="text-2xl block animate-bounce">🚑</span>
+                              <span className="text-xs text-red-400 font-extrabold block uppercase">Solicitud de Ambulancia de Guardia</span>
+                              <p className="text-[10px] text-slate-300">
+                                Esperando que la unidad paramédica de resguardo SecureFlow confirme tu despacho físico. Por favor, mantente a la espera.
                               </p>
-
-                              <div className="mt-4 flex gap-2 justify-center">
-                                <button 
-                                  onClick={() => {
-                                    setShowWalletModal(true);
-                                  }}
-                                  className="bg-blue-600/15 hover:bg-blue-600/25 text-blue-400 py-2.5 px-6 rounded-2xl text-xs font-black border border-blue-500/20 shadow-lg shadow-blue-500/5 transition-all flex items-center gap-1.5 active:scale-95"
-                                >
-                                  💰 Ver mi Saldo: $ {citizenBalance.toFixed(2)} USD
-                                </button>
+                              <div className="w-full bg-slate-800 rounded-full h-1 relative overflow-hidden">
+                                <div className="bg-red-500 h-full rounded-full animate-sweep" style={{ width: '40%' }} />
                               </div>
                             </div>
+                          )}
 
-                            {/* Active livestream transmission container */}
-                            {isLiveVideoActive && (
-                              <div className="bg-immersive-card border border-blue-500/30 rounded-2xl p-3 space-y-2">
-                                <div className="flex justify-between items-center">
-                                  <span className="text-[10px] font-bold text-red-500 flex items-center gap-1">
-                                    <span className="w-1.5 h-1.5 bg-red-500 rounded-full animate-ping" />
-                                    VIDEO CONEXIÓN SOS ACTIVA
-                                  </span>
-                                  <span className="text-[9px] text-slate-400 font-mono">
-                                    ID: {activeEmergency?.id?.substring(0, 8).toUpperCase() || 'SALA'}
-                                  </span>
-                                </div>
-
-                                {/* Actual Interactive Daily.co WebRTC Video Iframe */}
-                                <div className="h-64 bg-slate-950 rounded-xl relative overflow-hidden border border-white/5 shadow-inner">
-                                  <iframe 
-                                    src={activeEmergency?.dailyRoomUrl || "https://iframe.daily.co/secureflow-abogado-defensa"}
-                                    allow="camera; microphone; fullscreen"
-                                    className="w-full h-full border-0 absolute inset-0 rounded-xl"
-                                    title="Daily.co Citizen SOS"
-                                  />
-                                  <div className="absolute top-2 left-2 bg-black/75 px-1.5 py-0.5 rounded text-[8px] text-red-400 font-mono tracking-wider pointer-events-none z-10 border border-white/5 uppercase">
-                                    GRABACIÓN Y RESPALDO EN NUBE 🛡️
-                                  </div>
-                                </div>
-
-                                <div className="flex justify-between items-center pt-1">
-                                  <p className="text-[9px] text-slate-400 font-mono">
-                                    📍 Lat: 10.4850 | Lng: -66.9030 (GPS Seguro)
-                                  </p>
-                                  <p className="text-[9px] text-emerald-400 font-extrabold uppercase">
-                                    Amparo Legal Gaceta G-42.458
-                                  </p>
-                                </div>
-                              </div>
-                            )}
-
-                            {/* Quick Action Matrix Grid */}
-                            <div className="space-y-4">
-                              <h4 className="text-xs font-bold text-slate-400 uppercase tracking-wider block">Módulos Corporativos</h4>
-                              
-                              <div className="grid grid-cols-2 gap-2.5">
-                                <button 
-                                  onClick={handleAmbulanceRequest}
-                                  className="p-3 bg-red-500/10 border border-red-500/20 rounded-2xl text-left hover:bg-red-500/20 transition-all text-red-400"
-                                >
-                                  <span className="text-lg block mb-1">🚑</span>
-                                  <span className="text-xs font-bold block">Pedir Ambulancia</span>
-                                </button>
-
-                                <button 
-                                  onClick={handleMedicRequest}
-                                  className="p-3 bg-emerald-500/10 border border-emerald-500/20 rounded-2xl text-left hover:bg-emerald-500/20 transition-all text-emerald-400"
-                                >
-                                  <span className="text-lg block mb-1">🏥</span>
-                                  <span className="text-xs font-bold block">Médico Guardia</span>
-                                </button>
-
-                                <button 
-                                  onClick={() => {
-                                    triggerPush('📍 GPS Localizado', 'Precisión: 4 metros. Latitud: 10.4850, Longitud: -66.9030.');
-                                    showMaterialAlert('📍 Trazabilidad GPS', 'Tus coordenadas seguras se encuentran emitiendo a la central de control insurtech de SecureFlow.');
-                                  }}
-                                  className="p-3 bg-slate-900/60 border border-slate-800 rounded-2xl text-left hover:bg-slate-900 transition-all text-slate-300"
-                                >
-                                  <span className="text-lg block mb-1">📍</span>
-                                  <span className="text-xs font-bold block">GPS Preciso</span>
-                                </button>
-
-                                <button 
-                                  onClick={handleTowRequest}
-                                  className="p-3 bg-yellow-500/10 border border-yellow-500/20 rounded-2xl text-left hover:bg-yellow-500/20 transition-all text-yellow-400"
-                                >
-                                  <span className="text-lg block mb-1">🚜</span>
-                                  <span className="text-xs font-bold block">Pedir Grúa</span>
-                                </button>
+                          {medicState === 'calling' && activeMedicEmergency && (
+                            <div className="p-4 bg-emerald-500/10 border border-emerald-500/30 rounded-2xl space-y-3 text-center animate-pulse">
+                              <span className="text-2xl block animate-bounce">🏥</span>
+                              <span className="text-xs text-emerald-400 font-extrabold block uppercase">Solicitando Doctor de Guardia</span>
+                              <p className="text-[10px] text-slate-300">
+                                Esperando que el médico cirujano de guardia reciba y acepte tu llamada de teleconsulta. No cierres la aplicación.
+                              </p>
+                              <div className="w-full bg-slate-800 rounded-full h-1 relative overflow-hidden">
+                                <div className="bg-emerald-500 h-full rounded-full animate-sweep" style={{ width: '40%' }} />
                               </div>
                             </div>
+                          )}
 
-                            {/* Gaceta background legal information */}
-                            <div className="bg-emerald-900/10 border border-emerald-500/20 p-4 rounded-2xl space-y-1.5 mt-2">
-                              <h4 className="text-xs font-bold text-emerald-400 flex items-center gap-1.5">
-                                <Scale className="w-3.5 h-3.5" /> Gaceta Oficial N° 42.458
-                              </h4>
-                              <p className="text-[11px] text-slate-300 leading-relaxed">
-                                "Resolución Conjunta: Los ciudadanos tienen pleno derecho a grabar procedimientos policiales en alcabalas vehiculares. Ningún funcionario puede quitarte el celular."
+                          {sosState === 'calling' && (
+                            <div className="p-4 bg-amber-500/10 border border-amber-500/30 rounded-2xl text-center space-y-2 animate-pulse mb-3">
+                              <span className="text-xl block animate-bounce">⚖️</span>
+                              <span className="text-xs text-amber-400 font-extrabold block uppercase">Buscando Abogado Penalista...</span>
+                              <p className="text-[10px] text-slate-300 leading-normal">
+                                Estamos enlazando tu ubicación y requerimiento SOS con la central de defensas viales en vivo. Por favor espera a que un profesional de guardia tome el control.
                               </p>
                             </div>
-                          </>
-                        )}
-                      </div>
-                    );
-                  })()}
+                          )}
+
+                          {/* Core Emergency SOS Glowing Button */}
+                          <div className="p-5 bg-immersive-card border border-white/5 rounded-3xl text-center shadow-md relative overflow-hidden">
+                            <div className="absolute inset-0 bg-gradient-to-b from-rose-950/10 to-transparent" />
+                            <h4 className="text-xs font-extrabold text-slate-300 tracking-wide uppercase mb-3">Defensa Penal en Caliente</h4>
+                            
+                            {/* Active breath circular element */}
+                            <div className="relative py-4 flex justify-center">
+                              <button 
+                                onClick={handleSosTrigger}
+                                className={`w-36 h-36 rounded-full flex flex-col items-center justify-center text-white cursor-pointer select-none transition-all active:scale-90 ${sosState !== 'idle' ? 'bg-gradient-to-tr from-amber-600 to-amber-500 animate-pulse' : 'bg-gradient-to-tr from-red-650 to-red-500 glow-blue animate-pulse-glow'}`}
+                              >
+                                <span className="text-3xl">🛡️</span>
+                                <span className="text-xl font-black mt-1 font-mono tracking-tighter">
+                                  {sosState === 'idle' ? 'SOS' : 'SOS ACTIVO'}
+                                </span>
+                                <span className="text-[10px] font-bold uppercase text-rose-100 opacity-90 mt-0.5">
+                                  {sosState === 'idle' ? 'TOCA PARA DEFENSA' : 'CONECTANDO'}
+                                </span>
+                              </button>
+                            </div>
+  
+                            <p className="text-[10px] text-slate-400 leading-relaxed mt-2.5 px-3">
+                              Encuentros en retenes o alcabalas. Videollamada de defensa legal auditada y almacenada en la Nube de Seguridad.
+                            </p>
+
+                            <div className="mt-4 flex gap-2 justify-center">
+                              <button 
+                                onClick={() => {
+                                  setShowWalletModal(true);
+                                }}
+                                className="bg-blue-600/15 hover:bg-blue-600/25 text-blue-400 py-2.5 px-6 rounded-2xl text-xs font-black border border-blue-500/20 shadow-lg shadow-blue-500/5 transition-all flex items-center gap-1.5 active:scale-95"
+                              >
+                                💰 Ver mi Saldo: $ {citizenBalance.toFixed(2)} USD
+                              </button>
+                            </div>
+                          </div>
+
+                          {/* Active livestream transmission container */}
+                          {isLiveVideoActive && (
+                            <div className="bg-immersive-card border border-blue-500/30 rounded-2xl p-3 space-y-2">
+                              <div className="flex justify-between items-center">
+                                <span className="text-[10px] font-bold text-red-500 flex items-center gap-1">
+                                  <span className="w-1.5 h-1.5 bg-red-500 rounded-full animate-ping" />
+                                  VIDEO CONEXIÓN SOS ACTIVA
+                                </span>
+                                <span className="text-[9px] text-slate-400 font-mono">
+                                  ID: {activeEmergency?.id?.substring(0, 8).toUpperCase() || 'SALA'}
+                                </span>
+                              </div>
+
+                              {/* Actual Interactive Daily.co WebRTC Video Iframe */}
+                              <div className="h-64 bg-slate-950 rounded-xl relative overflow-hidden border border-white/5 shadow-inner">
+                                <iframe 
+                                  src={activeEmergency?.dailyRoomUrl || "https://iframe.daily.co/secureflow-abogado-defensa"}
+                                  allow="camera; microphone; fullscreen"
+                                  className="w-full h-full border-0 absolute inset-0 rounded-xl"
+                                  title="Daily.co Citizen SOS"
+                                />
+                                <div className="absolute top-2 left-2 bg-black/75 px-1.5 py-0.5 rounded text-[8px] text-red-400 font-mono tracking-wider pointer-events-none z-10 border border-white/5 uppercase">
+                                  GRABACIÓN Y RESPALDO EN NUBE 🛡️
+                                </div>
+                              </div>
+
+                              <div className="flex justify-between items-center pt-1">
+                                <p className="text-[9px] text-slate-400 font-mono">
+                                  📍 Lat: 10.4850 | Lng: -66.9030 (GPS Seguro)
+                                </p>
+                                <p className="text-[9px] text-emerald-400 font-extrabold uppercase">
+                                  Amparo Legal Gaceta G-42.458
+                                </p>
+                              </div>
+                            </div>
+                          )}
+
+                          {/* Quick Action Matrix Grid */}
+                          <div className="space-y-4">
+                            <h4 className="text-xs font-bold text-slate-400 uppercase tracking-wider block">Módulos Corporativos</h4>
+                            
+                            <div className="grid grid-cols-2 gap-2.5">
+                              <button 
+                                onClick={handleAmbulanceRequest}
+                                className="p-3 bg-red-500/10 border border-red-500/20 rounded-2xl text-left hover:bg-red-500/20 transition-all text-red-400"
+                              >
+                                <span className="text-lg block mb-1">🚑</span>
+                                <span className="text-xs font-bold block">Pedir Ambulancia</span>
+                              </button>
+
+                              <button 
+                                onClick={handleMedicRequest}
+                                className="p-3 bg-emerald-500/10 border border-emerald-500/20 rounded-2xl text-left hover:bg-emerald-500/20 transition-all text-emerald-400"
+                              >
+                                <span className="text-lg block mb-1">🏥</span>
+                                <span className="text-xs font-bold block">Médico Guardia</span>
+                              </button>
+
+                              <button 
+                                onClick={() => {
+                                  triggerPush('📍 GPS Localizado', 'Precisión: 4 metros. Latitud: 10.4850, Longitud: -66.9030.');
+                                  showMaterialAlert('📍 Trazabilidad GPS', 'Tus coordenadas seguras se encuentran emitiendo a la central de control insurtech de SecureFlow.');
+                                }}
+                                className="p-3 bg-slate-900/60 border border-slate-800 rounded-2xl text-left hover:bg-slate-900 transition-all text-slate-300"
+                              >
+                                <span className="text-lg block mb-1">📍</span>
+                                <span className="text-xs font-bold block">GPS Preciso</span>
+                              </button>
+
+                              <button 
+                                onClick={handleTowRequest}
+                                className="p-3 bg-yellow-500/10 border border-yellow-500/20 rounded-2xl text-left hover:bg-yellow-500/20 transition-all text-yellow-400"
+                              >
+                                <span className="text-lg block mb-1">🚜</span>
+                                <span className="text-xs font-bold block">Pedir Grúa</span>
+                              </button>
+                            </div>
+                          </div>
+
+                          {/* Gaceta background legal information */}
+                          <div className="bg-emerald-900/10 border border-emerald-500/20 p-4 rounded-2xl space-y-1.5 mt-2">
+                            <h4 className="text-xs font-bold text-emerald-400 flex items-center gap-1.5">
+                              <Scale className="w-3.5 h-3.5" /> Gaceta Oficial N° 42.458
+                            </h4>
+                            <p className="text-[11px] text-slate-300 leading-relaxed">
+                              "Resolución Conjunta: Los ciudadanos tienen pleno derecho a grabar procedimientos policiales en alcabalas vehiculares. Ningún funcionario puede quitarte el celular."
+                            </p>
+                          </div>
+                        </div>
+                      );
+                    })()}
 
                     {/* TAB CITIZEN AI AGENT & CHATS */}
                     {citizenTab === 'agent' && (

@@ -906,9 +906,7 @@ export default function App() {
               .upsert([{
                 id: resolvedUserId,
                 auth_id: resolvedUserId,
-                rol: finalRole,
-                nombre_completo: finalName,
-                tipo_vehiculo: (vehicleType === 'moto' || vehicleType === 'coche') ? vehicleType : 'coche'
+                rol: 'citizen'
               }], { onConflict: 'auth_id' })
               .select()
               .maybeSingle();
@@ -1937,11 +1935,11 @@ export default function App() {
       setTowDriverCoords({ lat, lng });
       setCraneUnitState({ lat_actual: lat, lng_actual: lng });
 
-      // Synchronize in real-time to active emergencias_activas
+      // Synchronize in real-time to active asistencias_viales
       if (activeTowJobRef.current?.id) {
         try {
           const { data: emer } = await supabase
-            .from('emergencias_activas')
+            .from('asistencias_viales')
             .select('sala_webrtc_url')
             .eq('id', activeTowJobRef.current.id)
             .maybeSingle();
@@ -1960,13 +1958,13 @@ export default function App() {
           };
 
           await supabase
-            .from('emergencias_activas')
+            .from('asistencias_viales')
             .update({
               sala_webrtc_url: JSON.stringify(parsed)
             })
             .eq('id', activeTowJobRef.current.id);
         } catch (err) {
-          console.error("Error setting emergencias_activas driver coordinate metadata:", err);
+          console.error("Error setting asistencias_viales driver coordinate metadata:", err);
         }
       }
 

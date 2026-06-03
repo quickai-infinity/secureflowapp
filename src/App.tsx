@@ -5668,95 +5668,112 @@ export default function App() {
                         <div className="p-4 space-y-4">
                           {isCitizenTowActive ? (
                             /* PANTALLA COMPLETA DE SEGUIMIENTO EN VIVO SEGÚN REGLA ESTRICTA DE LA MÁQUINA DE ESTADOS */
-                            <div className="animate-fade-in space-y-4">
-                              <div className="flex justify-between items-center bg-indigo-950/40 p-3 rounded-2xl border border-indigo-500/20">
-                                <div className="text-left">
-                                  <span className="text-[10px] font-bold text-indigo-400 font-mono tracking-widest uppercase animate-pulse block">🚜 GRÚA EN RUTA</span>
-                                  <h3 className="text-xs font-black text-white mt-1">Conductor: {activeTowJob.driverName || 'Operador de Guardia'}</h3>
-                                  <div className="flex items-center gap-2 mt-1">
-                                    {activeTowJob.driverPhone && (
-                                      <span className="text-[10px] text-slate-400 font-mono">{activeTowJob.driverPhone}</span>
-                                    )}
-                                    <span className="text-[9px] bg-indigo-900 text-yellow-400 px-1.5 py-0.5 rounded font-bold uppercase tracking-wider border border-yellow-500/30">
-                                      Placa: {activeTowJob.vehiclePlate || 'A92B45X'}
+                            <div className="absolute inset-0 z-50 bg-slate-950 flex flex-col justify-stretch overflow-hidden animate-fade-in" id="citizen-active-tracking-fullscreen">
+                              {/* Live road tracking map */}
+                              {craneUnitState?.lat_actual && craneUnitState?.lng_actual && (activeTowJob?.latitude || citizenCoords.lat) && (activeTowJob?.longitude || citizenCoords.lng) ? (
+                                <div className="absolute inset-0 z-0">
+                                  <RoadsideMap
+                                    driverLat={craneUnitState.lat_actual}
+                                    driverLng={craneUnitState.lng_actual}
+                                    citizenLat={activeTowJob?.latitude || citizenCoords.lat}
+                                    citizenLng={activeTowJob?.longitude || citizenCoords.lng}
+                                  />
+                                </div>
+                              ) : (
+                                <div className="absolute inset-0 bg-slate-950 flex flex-col justify-center items-center p-3 text-center space-y-1 z-0">
+                                  <span className="text-xl animate-spin text-indigo-400">📡</span>
+                                  <span className="text-[10px] text-slate-400 font-bold uppercase tracking-wide">Sincronizando señal GPS de la Grúa...</span>
+                                </div>
+                              )}
+
+                              {/* Floating overlays over map: info box, total visual destruction of coexistence Custom */}
+                              <div className="absolute bottom-4 left-4 right-4 z-10 space-y-3 pointer-events-none animate-slide-up" id="floating-live-panel-fullscreen">
+                                
+                                {/* Driver card */}
+                                <div className="bg-slate-900/95 backdrop-blur-md rounded-2xl p-4 border border-indigo-500/20 shadow-2xl pointer-events-auto text-left">
+                                  <div className="flex justify-between items-center mb-3">
+                                    <div className="text-left">
+                                      <span className="text-[10px] font-bold text-indigo-400 font-mono tracking-widest uppercase animate-pulse block">🚜 GRÚA EN RUTA</span>
+                                      <h3 className="text-xs font-black text-white mt-1">Conductor: {activeTowJob.driverName || 'Operador de Guardia'}</h3>
+                                      <div className="flex items-center gap-2 mt-1">
+                                        {activeTowJob.driverPhone && (
+                                          <span className="text-[10px] text-slate-400 font-mono">{activeTowJob.driverPhone}</span>
+                                        )}
+                                        <span className="text-[9px] bg-indigo-900 text-yellow-400 px-1.5 py-0.5 rounded font-bold uppercase tracking-wider border border-yellow-500/30">
+                                          Placa: {activeTowJob.vehiclePlate || 'A92B45X'}
+                                        </span>
+                                      </div>
+                                    </div>
+                                    <span className="text-[10px] bg-indigo-900/40 text-indigo-200 px-2 py-1 rounded-lg border border-indigo-500/10 font-mono self-start shrink-0">
+                                      ETA • {Math.ceil((activeTowJob.distance || 5400) / 150) || 5} min
                                     </span>
                                   </div>
+
+                                  {/* Pricing Breakdown */}
+                                  <div className="bg-slate-950/80 p-3 rounded-xl border border-white/5 text-[9.5px] space-y-1 font-mono mb-3">
+                                    {(() => {
+                                      const distKm = (activeTowJob.distance || 5400) / 1000;
+                                      const baseFee = tariffs.grua?.tarifa_base ?? 30.00;
+                                      const kmRate = tariffs.grua?.precio_por_km ?? 4.50;
+                                      const costKm = distKm * kmRate;
+                                      const totalCalculated = baseFee + costKm;
+                                      return (
+                                        <>
+                                          <div className="flex justify-between text-slate-400">
+                                            <span>Tarifa Base:</span>
+                                            <span>$ {baseFee.toFixed(2)} USD</span>
+                                          </div>
+                                          <div className="flex justify-between text-slate-400">
+                                            <span>Precio por Km:</span>
+                                            <span>$ {kmRate.toFixed(2)} USD</span>
+                                          </div>
+                                          <div className="flex justify-between text-slate-400">
+                                            <span>Distancia:</span>
+                                            <span>{distKm.toFixed(2)} Km ({costKm.toFixed(2)} USD)</span>
+                                          </div>
+                                          <div className="flex justify-between border-t border-white/5 pt-1.5 font-sans font-bold text-xs mt-1 text-red-400">
+                                            <span>Costo Total:</span>
+                                            <span>$ {totalCalculated.toFixed(2)} USD</span>
+                                          </div>
+                                        </>
+                                      );
+                                    })()}
+                                  </div>
+
+                                  <div className="flex gap-2">
+                                    <button 
+                                      onClick={() => {
+                                        showMaterialAlert('Cancelando Asistencia', 'Procediendo a cancelar despacho vial...');
+                                        handleCancelTowRequest();
+                                      }}
+                                      className="bg-red-950/60 border border-red-500/20 hover:bg-red-900/40 text-red-005 px-4 py-2.5 rounded-xl text-xs font-bold uppercase transition-all select-none font-mono text-red-400"
+                                    >
+                                      Cancelar
+                                    </button>
+                                    <button 
+                                      onClick={() => {
+                                        setCitizenTab('agent');
+                                      }}
+                                      className="flex-1 bg-indigo-650 hover:bg-indigo-600 text-white py-2.5 rounded-xl text-xs font-black tracking-wide transition-all text-center uppercase shadow-lg select-none"
+                                    >
+                                      💬 Mensajes con Grúa
+                                    </button>
+                                    <button 
+                                      onClick={() => {
+                                        setIsTowDailyCoActive(!isTowDailyCoActive);
+                                        const webrtcUrl = activeVialAssist?.sala_webrtc_url || (activeTowJob ? "https://iframe.daily.co/secureflow-tow-" + activeTowJob.id : "");
+                                        setTowDailyCoUrl(webrtcUrl);
+                                      }}
+                                      className="bg-slate-800 hover:bg-slate-755 text-indigo-300 px-3.5 py-2.5 rounded-xl text-xs font-bold border border-white/5 transition-all uppercase flex items-center justify-center gap-1"
+                                    >
+                                      📹 {isTowDailyCoActive ? 'Ocultar' : 'Video WebRTC'}
+                                    </button>
+                                  </div>
                                 </div>
-                                <span className="text-[10px] bg-indigo-900/40 text-indigo-200 px-2 py-1 rounded-lg border border-indigo-500/10 font-mono self-start shrink-0">
-                                  ETA • {Math.ceil((activeTowJob.distance || 5400) / 150) || 5} min
-                                </span>
                               </div>
 
-                            {/* Transparent Pricing Split Details */}
-                            <div className="bg-slate-900 rounded-2xl p-3 border border-indigo-500/15 text-[10px] space-y-1.5 font-mono">
-                              <div className="flex justify-between text-slate-400 border-b border-white/5 pb-1 font-sans font-bold">
-                                <span>Vehículo Asegurado:</span>
-                                <span className="text-white">{citizenVehicleType === 'coche' ? '🚗 Automóvil / Coche' : '🏍️ Motocicleta / Moto'}</span>
-                              </div>
-                              {(() => {
-                                const distKm = (activeTowJob.distance || 5400) / 1000;
-                                const baseFee = tariffs.grua?.tarifa_base ?? 30.00;
-                                const kmRate = tariffs.grua?.precio_por_km ?? 4.50;
-                                const costKm = distKm * kmRate;
-                                const totalCalculated = baseFee + costKm;
-                                return (
-                                  <>
-                                    <div className="flex justify-between text-slate-400">
-                                      <span>Tarifa Base:</span>
-                                      <span>$ {baseFee.toFixed(2)} USD</span>
-                                    </div>
-                                    <div className="flex justify-between text-slate-400">
-                                      <span>Precio por Km:</span>
-                                      <span>$ {kmRate.toFixed(2)} USD</span>
-                                    </div>
-                                    <div className="flex justify-between text-slate-400">
-                                      <span>Distancia Recorrida:</span>
-                                      <span>{distKm.toFixed(2)} Km ({costKm.toFixed(2)} USD)</span>
-                                    </div>
-                                    <div className="flex justify-between text-red-400 border-t border-white/5 pt-1">
-                                      <span>Costo Total:</span>
-                                      <strong className="text-xs font-sans font-bold">$ {totalCalculated.toFixed(2)} USD</strong>
-                                    </div>
-                                    <div className="flex justify-between text-green-400 font-sans text-[9px] uppercase tracking-wider">
-                                      <span>Acreditado al chofer (80%):</span>
-                                      <strong>+ $ {(totalCalculated * 0.8).toFixed(2)} USD</strong>
-                                    </div>
-                                    <div className="flex justify-between text-slate-500 text-[9px] uppercase tracking-wider">
-                                      <span>Fondo de operaciones (20%):</span>
-                                      <span>$ {(totalCalculated * 0.2).toFixed(2)} USD</span>
-                                    </div>
-                                  </>
-                                );
-                              })()}
                             </div>
-
-                            {/* Live road tracking map */}
-                            {craneUnitState?.lat_actual && craneUnitState?.lng_actual && (activeTowJob?.latitude || citizenCoords.lat) && (activeTowJob?.longitude || citizenCoords.lng) ? (
-                              <div className="h-96 rounded-2xl border border-indigo-500/20 overflow-hidden relative shadow-lg">
-                                <RoadsideMap
-                                  driverLat={craneUnitState.lat_actual}
-                                  driverLng={craneUnitState.lng_actual}
-                                  citizenLat={activeTowJob?.latitude || citizenCoords.lat}
-                                  citizenLng={activeTowJob?.longitude || citizenCoords.lng}
-                                />
-                              </div>
-                            ) : (
-                              <div className="h-96 rounded-2xl border border-slate-800/40 bg-slate-950 flex flex-col justify-center items-center p-3 text-center space-y-1">
-                                <span className="text-xl animate-spin text-indigo-400">📡</span>
-                                <span className="text-[10px] text-slate-400 font-bold uppercase tracking-wide">Sincronizando señal GPS de la Grúa...</span>
-                              </div>
-                            )}
-
-                            <button 
-                              onClick={() => {
-                                setCitizenTab('agent');
-                              }}
-                              className="w-full bg-indigo-650 hover:bg-indigo-600 text-white py-2.5 rounded-2xl text-[11px] font-black tracking-wide transition-all text-center uppercase shadow-lg select-none"
-                            >
-                              💬 Abrir Chat Directo con Chofer
-                            </button>
-                          </div>
-                        ) : (
+                          ) : (
                           <>
                             {/* Welcome header in MD3 */}
                             <div className="text-left mt-1.5">

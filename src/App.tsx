@@ -3302,17 +3302,13 @@ export default function App() {
 
           } else {
             // PARA TODOS LOS DEMÁS ROLES: PASO 2 (Identidad Base obligatoria)
-            const { error: dbErr } = await supabase.from('usuarios').insert([{
+            const { error: dbErr } = await supabase.from('usuarios').upsert([{
               id: uId,
               auth_id: uId,
-              rol: rolSeleccionado,
-              nombre_completo: finalName,
-              tipo_vehiculo: chosenRole === 'citizen' ? citizenVehicleType : null,
-              contacto_emergencia_1_nombre: alertContacts.name1 || 'Mi Madre',
-              contacto_emergencia_1_telefono: alertContacts.tel1 || '584249998877',
-              contacto_emergencia_2_nombre: alertContacts.name2 || 'Mi Hermano',
-              contacto_emergencia_2_telefono: alertContacts.tel2 || '584126665544'
-            }]);
+              nombre_completo: citizenProfile.name || 'Usuario SecureFlow',
+              telefono: citizenProfile.phone || '584241234567',
+              email: authEmail.trim()
+            }], { onConflict: 'auth_id' });
 
             if (dbErr) {
               console.error("Error al registrar identidad base en usuarios:", dbErr);
@@ -3538,17 +3534,13 @@ export default function App() {
 
               } else {
                 // PARA TODOS LOS DEMÁS ROLES: PASO 2 (Identidad Base obligatoria)
-                const { error: dbErr } = await supabase.from('usuarios').insert([{
+                const { error: dbErr } = await supabase.from('usuarios').upsert([{
                   id: uId,
                   auth_id: uId,
-                  rol: rolSeleccionado,
-                  nombre_completo: finalName,
-                  tipo_vehiculo: chosenRole === 'citizen' ? citizenVehicleType : null,
-                  contacto_emergencia_1_nombre: alertContacts.name1 || 'Mi Madre',
-                  contacto_emergencia_1_telefono: alertContacts.tel1 || '584249998877',
-                  contacto_emergencia_2_nombre: alertContacts.name2 || 'Mi Hermano',
-                  contacto_emergencia_2_telefono: alertContacts.tel2 || '584126665544'
-                }]);
+                  nombre_completo: citizenProfile.name || 'Usuario SecureFlow',
+                  telefono: citizenProfile.phone || '584241234567',
+                  email: authEmail.trim()
+                }], { onConflict: 'auth_id' });
 
                 if (dbErr) {
                   console.error("Error al registrar identidad base en usuarios:", dbErr);

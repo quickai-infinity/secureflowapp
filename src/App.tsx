@@ -3226,17 +3226,19 @@ export default function App() {
         const signupMetadata = {
           nombre_completo: finalName,
           telefono: finalPhone,
+          phone: finalPhone,
+          rol: rolSeleccionado,
           role: rolSeleccionado,
           tipo_vehiculo: citizenVehicleType || 'coche',
           inpreabogado: impreAbogadoField || '',
           ciudad: citizenProfile.city || 'Caracas',
           cedula: ciudadanoIdField || '',
           especialidad: selectRole === 'lawyer' ? 'Defensa Penal' : (selectRole === 'medic' ? 'Triaje de Guardia' : ''),
-          impre_bogado: impreAbogadoField || null,
-          ciudadano_id: ciudadanoIdField || null,
-          grua_id: gruaIdField || null,
-          credential_ambulance: credentialAmbulanceField || null,
-          credential_medic: credentialMedicField || null
+          impre_bogado: impreAbogadoField || '',
+          ciudadano_id: ciudadanoIdField || '',
+          grua_id: gruaIdField || '',
+          credential_ambulance: credentialAmbulanceField || '',
+          credential_medic: credentialMedicField || ''
         };
 
         // PASO 1 (Autenticación pura)
@@ -3471,6 +3473,8 @@ export default function App() {
             const signupMetadata = {
               nombre_completo: finalName,
               telefono: finalPhone,
+              phone: finalPhone,
+              rol: rolSeleccionado,
               role: rolSeleccionado,
               tipo_vehiculo: citizenVehicleType || 'coche',
               inpreabogado: impreAbogadoField || 'INPRE-98.421',

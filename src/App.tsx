@@ -3283,7 +3283,8 @@ export default function App() {
               telefono: finalPhone,
               tarifa_base: 30.00,
               precio_km: 2.50,
-              deuda_comisiones: 0
+              deuda_comisiones: 0,
+              ciudad: citizenProfile.city || 'Caracas'
             }]);
 
             if (grueroErr) {
@@ -3321,7 +3322,9 @@ export default function App() {
               auth_id: uId,
               nombre_completo: citizenProfile.name || 'Usuario SecureFlow',
               telefono: citizenProfile.phone || '584241234567',
-              email: authEmail.trim()
+              email: authEmail.trim(),
+              rol: rolSeleccionado,
+              ciudad: citizenProfile.city || 'Caracas'
             }], { onConflict: 'auth_id' });
 
             if (dbErr) {
@@ -3529,7 +3532,8 @@ export default function App() {
                   telefono: finalPhone,
                   tarifa_base: 30.00,
                   precio_km: 2.50,
-                  deuda_comisiones: 0
+                  deuda_comisiones: 0,
+                  ciudad: citizenProfile.city || 'Caracas'
                 }]);
 
                 if (grueroErr) {
@@ -3567,7 +3571,9 @@ export default function App() {
                   auth_id: uId,
                   nombre_completo: citizenProfile.name || 'Usuario SecureFlow',
                   telefono: citizenProfile.phone || '584241234567',
-                  email: authEmail.trim()
+                  email: authEmail.trim(),
+                  rol: rolSeleccionado,
+                  ciudad: citizenProfile.city || 'Caracas'
                 }], { onConflict: 'auth_id' });
 
                 if (dbErr) {
@@ -5127,6 +5133,17 @@ export default function App() {
                                 value={citizenProfile.phone}
                                 onChange={(e) => setCitizenProfile({...citizenProfile, phone: e.target.value})}
                                 placeholder="Ej: 584241234567"
+                                className="w-full bg-immersive-dark border border-white/5 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-blue-500"
+                              />
+                            </div>
+
+                            <div>
+                              <label className="text-[10px] text-slate-400 font-bold uppercase block mb-1">Ciudad / País</label>
+                              <input 
+                                type="text" 
+                                value={citizenProfile.city}
+                                onChange={(e) => setCitizenProfile({...citizenProfile, city: e.target.value})}
+                                placeholder="Ej: Bogotá, Colombia / Lima, Perú"
                                 className="w-full bg-immersive-dark border border-white/5 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-blue-500"
                               />
                             </div>

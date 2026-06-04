@@ -448,6 +448,7 @@ export default function App() {
   const [authEmail, setAuthEmail] = useState<string>('');
   const [authPassword, setAuthPassword] = useState<string>('');
   const [isRegisterMode, setIsRegisterMode] = useState<boolean>(false);
+  const [selectedCity, setSelectedCity] = useState<string>('Caracas, Venezuela');
   const [isAuthLoading, setIsAuthLoading] = useState<boolean>(false);
   const [selectRole, setSelectRole] = useState<'citizen' | 'lawyer' | 'driver' | 'ambulance' | 'medic'>('citizen');
   
@@ -1966,39 +1967,6 @@ export default function App() {
       setTowDriverCoords({ lat, lng });
       setCraneUnitState({ lat_actual: lat, lng_actual: lng });
 
-      // Synchronize in real-time to active asistencias_viales
-      if (activeTowJobRef.current?.id) {
-        try {
-          const { data: emer } = await supabase
-            .from('asistencias_viales')
-            .select('sala_webrtc_url')
-            .eq('id', activeTowJobRef.current.id)
-            .maybeSingle();
-
-          let parsed: any = { type: 'tow' };
-          if (emer?.sala_webrtc_url && emer.sala_webrtc_url.startsWith('{')) {
-            try {
-              parsed = JSON.parse(emer.sala_webrtc_url);
-            } catch {}
-          }
-
-          parsed = {
-            ...parsed,
-            driverLat: lat,
-            driverLng: lng
-          };
-
-          await supabase
-            .from('asistencias_viales')
-            .update({
-              sala_webrtc_url: JSON.stringify(parsed)
-            })
-            .eq('id', activeTowJobRef.current.id);
-        } catch (err) {
-          console.error("Error setting asistencias_viales driver coordinate metadata:", err);
-        }
-      }
-
       try {
         // Resolve the true grueros.id from public.grueros table where auth_id equals sessionUser.id
         const { data: qGruero } = await supabase
@@ -2026,7 +1994,7 @@ export default function App() {
             .update({
               lat_actual: lat,
               lng_actual: lng,
-              estado: 'en_ruta'
+              estado: 'disponible'
             })
             .eq('gruero_id', actualGrueroId);
         } else {
@@ -2036,7 +2004,7 @@ export default function App() {
               gruero_id: actualGrueroId,
               lat_actual: lat,
               lng_actual: lng,
-              estado: 'en_ruta'
+              estado: 'disponible'
             });
         }
       } catch (err) {
@@ -3231,7 +3199,7 @@ export default function App() {
           role: rolSeleccionado,
           tipo_vehiculo: citizenVehicleType || 'coche',
           inpreabogado: impreAbogadoField || '',
-          ciudad: citizenProfile.city || 'Caracas',
+          ciudad: selectedCity,
           cedula: ciudadanoIdField || '',
           especialidad: selectRole === 'lawyer' ? 'Defensa Penal' : (selectRole === 'medic' ? 'Triaje de Guardia' : ''),
           impre_bogado: impreAbogadoField || '',
@@ -3284,7 +3252,7 @@ export default function App() {
               tarifa_base: 30.00,
               precio_km: 2.50,
               deuda_comisiones: 0,
-              ciudad: citizenProfile.city || 'Caracas'
+              ciudad: selectedCity
             }]);
 
             if (grueroErr) {
@@ -3305,7 +3273,7 @@ export default function App() {
               name: finalName,
               email: authEmail.trim(),
               phone: finalPhone,
-              city: citizenProfile.city || 'Caracas',
+              city: selectedCity,
               vehiclePlate: gruaIdField.trim() || 'A92B45X'
             });
             setDriverBalance(0.00);
@@ -3324,7 +3292,7 @@ export default function App() {
               telefono: citizenProfile.phone || '584241234567',
               email: authEmail.trim(),
               rol: rolSeleccionado,
-              ciudad: citizenProfile.city || 'Caracas'
+              ciudad: selectedCity
             }], { onConflict: 'auth_id' });
 
             if (dbErr) {
@@ -3351,7 +3319,7 @@ export default function App() {
                 nombre_completo: finalName,
                 telefono: finalPhone,
                 email: authEmail.trim(),
-                ciudad: citizenProfile.city || 'Caracas',
+                ciudad: selectedCity,
                 inpreabogado: impreAbogadoField || '',
                 especialidad: 'Defensa Penal'
               }]);
@@ -3364,7 +3332,7 @@ export default function App() {
                 name: finalName,
                 email: authEmail.trim(),
                 phone: finalPhone,
-                city: citizenProfile.city || 'Caracas',
+                city: selectedCity,
                 licenseNumber: impreAbogadoField,
                 specialty: 'Derecho Procesal & Penal'
               });
@@ -3375,7 +3343,7 @@ export default function App() {
                 name: finalName,
                 email: authEmail.trim(),
                 phone: finalPhone,
-                city: citizenProfile.city || 'Caracas'
+                city: selectedCity
               });
 
             } else if (chosenRole === 'ambulance') {
@@ -3392,7 +3360,7 @@ export default function App() {
                 name: finalName,
                 email: authEmail.trim(),
                 phone: finalPhone,
-                city: citizenProfile.city || 'Caracas',
+                city: selectedCity,
                 vehiclePlate: credentialAmbulanceField || 'AMB-402X'
               });
 
@@ -3410,7 +3378,7 @@ export default function App() {
                 name: finalName,
                 email: authEmail.trim(),
                 phone: finalPhone,
-                city: citizenProfile.city || 'Caracas',
+                city: selectedCity,
                 licenseNumber: credentialMedicField || 'MSAS-42.501'
               });
             }
@@ -3481,7 +3449,7 @@ export default function App() {
               role: rolSeleccionado,
               tipo_vehiculo: citizenVehicleType || 'coche',
               inpreabogado: impreAbogadoField || 'INPRE-98.421',
-              ciudad: citizenProfile.city || 'Caracas',
+              ciudad: selectedCity,
               cedula: ciudadanoIdField || 'V-12.345.678',
               especialidad: selectRole === 'lawyer' ? 'Defensa Penal' : (selectRole === 'medic' ? 'Triaje de Guardia' : ''),
               impre_bogado: impreAbogadoField || 'INPRE-98.421',
@@ -3515,7 +3483,7 @@ export default function App() {
                   await supabase.from('credenciales_biometricas').insert([{
                     user_id: uId,
                     foto_base64: selfieCaptured,
-                    rol_asignado: chosenRole
+                    rol_assigned: chosenRole
                   }]);
                 }
               } catch (biometricErr) {
@@ -3533,7 +3501,7 @@ export default function App() {
                   tarifa_base: 30.00,
                   precio_km: 2.50,
                   deuda_comisiones: 0,
-                  ciudad: citizenProfile.city || 'Caracas'
+                  ciudad: selectedCity
                 }]);
 
                 if (grueroErr) {
@@ -3554,7 +3522,7 @@ export default function App() {
                   name: finalName,
                   email: authEmail.trim(),
                   phone: finalPhone,
-                  city: citizenProfile.city || 'Caracas',
+                  city: selectedCity,
                   vehiclePlate: gruaIdField.trim() || 'A92B45X'
                 });
                 setDriverBalance(0.00);
@@ -3573,7 +3541,7 @@ export default function App() {
                   telefono: citizenProfile.phone || '584241234567',
                   email: authEmail.trim(),
                   rol: rolSeleccionado,
-                  ciudad: citizenProfile.city || 'Caracas'
+                  ciudad: selectedCity
                 }], { onConflict: 'auth_id' });
 
                 if (dbErr) {
@@ -3600,7 +3568,7 @@ export default function App() {
                     nombre_completo: finalName,
                     telefono: finalPhone,
                     email: authEmail.trim(),
-                    ciudad: citizenProfile.city || 'Caracas',
+                    ciudad: selectedCity,
                     inpreabogado: impreAbogadoField || 'INPRE-98.421',
                     especialidad: 'Defensa Penal'
                   }]);
@@ -3613,7 +3581,7 @@ export default function App() {
                     name: finalName,
                     email: authEmail.trim(),
                     phone: finalPhone,
-                    city: citizenProfile.city || 'Caracas',
+                    city: selectedCity,
                     licenseNumber: impreAbogadoField || 'INPRE-98.421',
                     specialty: 'Derecho Procesal & Penal'
                   });
@@ -3624,7 +3592,7 @@ export default function App() {
                     name: finalName,
                     email: authEmail.trim(),
                     phone: finalPhone,
-                    city: citizenProfile.city || 'Caracas'
+                    city: selectedCity
                   });
 
                 } else if (chosenRole === 'ambulance') {
@@ -3641,7 +3609,7 @@ export default function App() {
                     name: finalName,
                     email: authEmail.trim(),
                     phone: finalPhone,
-                    city: citizenProfile.city || 'Caracas',
+                    city: selectedCity,
                     vehiclePlate: credentialAmbulanceField || 'AMB-402X'
                   });
 
@@ -3659,7 +3627,7 @@ export default function App() {
                     name: finalName,
                     email: authEmail.trim(),
                     phone: finalPhone,
-                    city: citizenProfile.city || 'Caracas',
+                    city: selectedCity,
                     licenseNumber: credentialMedicField || 'MSAS-42.501'
                   });
                 }
@@ -4404,33 +4372,6 @@ export default function App() {
           .eq('gruero_id', actualGrueroId);
       }
 
-      // 2. Update emergencias_activas json state
-      const { data: emer } = await supabase
-        .from('emergencias_activas')
-        .select('sala_webrtc_url')
-        .eq('id', activeTowJob.id)
-        .maybeSingle();
-
-      let parsed: any = { type: 'tow' };
-      if (emer?.sala_webrtc_url) {
-        try {
-          parsed = JSON.parse(emer.sala_webrtc_url);
-        } catch {}
-      }
-
-      parsed = {
-        ...parsed,
-        driverLat: stepLat,
-        driverLng: stepLng
-      };
-
-      await supabase
-        .from('emergencias_activas')
-        .update({
-          sala_webrtc_url: JSON.stringify(parsed)
-        })
-        .eq('id', activeTowJob.id);
-
       triggerPush('🚜 Grúa en Movimiento', 'Localización GPS simulada con éxito hacia tu vehículo.');
     } catch (e) {
       console.error("Error in driver simulated movement progress:", e);
@@ -5138,14 +5079,25 @@ export default function App() {
                             </div>
 
                             <div>
-                              <label className="text-[10px] text-slate-400 font-bold uppercase block mb-1">Ciudad / País</label>
-                              <input 
-                                type="text" 
-                                value={citizenProfile.city}
-                                onChange={(e) => setCitizenProfile({...citizenProfile, city: e.target.value})}
-                                placeholder="Ej: Bogotá, Colombia / Lima, Perú"
-                                className="w-full bg-immersive-dark border border-white/5 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-blue-500"
-                              />
+                              <label className="text-[10px] text-slate-400 font-bold uppercase block mb-1">Ciudad / País de Operación</label>
+                              <select 
+                                value={selectedCity}
+                                onChange={(e) => setSelectedCity(e.target.value)}
+                                className="w-full bg-immersive-dark border border-white/5 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-blue-500 bg-black/40"
+                              >
+                                <option value="Caracas, Venezuela">Caracas, Venezuela</option>
+                                <option value="Bogotá, Colombia">Bogotá, Colombia</option>
+                                <option value="Lima, Perú">Lima, Perú</option>
+                                <option value="Santiago, Chile">Santiago, Chile</option>
+                                <option value="Buenos Aires, Argentina">Buenos Aires, Argentina</option>
+                                <option value="Ciudad de México, México">Ciudad de México, México</option>
+                                <option value="Miami, USA">Miami, USA</option>
+                                <option value="Ciudad de Panamá, Panamá">Ciudad de Panamá, Panamá</option>
+                                <option value="San José, Costa Rica">San José, Costa Rica</option>
+                                <option value="Guayaquil, Ecuador">Guayaquil, Ecuador</option>
+                                <option value="Asunción, Paraguay">Asunción, Paraguay</option>
+                                <option value="Montevideo, Uruguay">Montevideo, Uruguay</option>
+                              </select>
                             </div>
 
                             <div>
@@ -5634,8 +5586,7 @@ export default function App() {
                           rawState === 'active' ||
                           rawState === 'en_route' ||
                           rawState === 'dispatched' ||
-                          rawState === 'aceptado' ||
-                          resolvedAssist.gruero_id
+                          rawState === 'aceptado'
                         ) {
                           est = 'activa';
                         } else if (

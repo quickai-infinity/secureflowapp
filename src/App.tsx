@@ -1791,8 +1791,7 @@ export default function App() {
           const { data: pendingList } = await supabase
             .from('asistencias_viales')
             .select('*')
-            .eq('estado', 'pendiente')
-            .eq('gruero_id', grueroId);
+            .eq('estado', 'pendiente');
 
           if (active && pendingList && pendingList.length > 0) {
             const assist = pendingList[0];
@@ -3871,7 +3870,7 @@ export default function App() {
       const vialInsertVal = {
         id: emerId,
         ciudadano_id: sessionUser?.id || null,
-        gruero_id: assignedGrueroId,
+        gruero_id: null,
         ubicacion_origen_lat: citizenCoords.lat,
         ubicacion_origen_lng: citizenCoords.lng,
         ubicacion_destino_texto: towDestinationText,
@@ -4219,7 +4218,7 @@ export default function App() {
         .from('asistencias_viales')
         .update({
           estado: 'activa',
-          gruero_id: sessionUser?.id || null
+          gruero_id: sessionUser.id
         })
         .eq('id', acceptedJobId);
     } catch (err) {

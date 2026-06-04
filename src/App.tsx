@@ -3236,8 +3236,7 @@ export default function App() {
           ciudadano_id: ciudadanoIdField || null,
           grua_id: gruaIdField || null,
           credential_ambulance: credentialAmbulanceField || null,
-          credential_medic: credentialMedicField || null,
-          selfie_url: selfieCaptured
+          credential_medic: credentialMedicField || null
         };
 
         // PASO 1 (Autenticación pura)
@@ -3257,6 +3256,19 @@ export default function App() {
           // Forzar sincronización de sesión en el cliente Supabase para satisfacer políticas de RLS
           if (authData.session) {
             await supabase.auth.setSession(authData.session);
+          }
+
+          // Guardar la Selfie Biométrica en la tabla credenciales_biometricas
+          try {
+            if (selfieCaptured) {
+              await supabase.from('credenciales_biometricas').insert([{
+                user_id: uId,
+                foto_base64: selfieCaptured,
+                rol_asignado: chosenRole
+              }]);
+            }
+          } catch (biometricErr) {
+            console.warn("Aviso: Biometría no guardada", biometricErr);
           }
 
           if (chosenRole === 'driver') {
@@ -3469,8 +3481,7 @@ export default function App() {
               ciudadano_id: ciudadanoIdField || 'V-12.345.678',
               grua_id: gruaIdField || 'A92B45X',
               credential_ambulance: credentialAmbulanceField || 'AMB-402X',
-              credential_medic: credentialMedicField || 'MSAS-42.501',
-              selfie_url: selfieCaptured || 'https://raw.githubusercontent.com/shadcn.png'
+              credential_medic: credentialMedicField || 'MSAS-42.501'
             };
 
             const { data: authData, error: signupErr } = await supabase.auth.signUp({
@@ -3489,6 +3500,19 @@ export default function App() {
               // Forzar sincronización de sesión en el cliente Supabase para satisfacer políticas de RLS
               if (authData.session) {
                 await supabase.auth.setSession(authData.session);
+              }
+
+              // Guardar la Selfie Biométrica en la tabla credenciales_biometricas
+              try {
+                if (selfieCaptured) {
+                  await supabase.from('credenciales_biometricas').insert([{
+                    user_id: uId,
+                    foto_base64: selfieCaptured,
+                    rol_asignado: chosenRole
+                  }]);
+                }
+              } catch (biometricErr) {
+                console.warn("Aviso: Biometría no guardada", biometricErr);
               }
 
               if (chosenRole === 'driver') {

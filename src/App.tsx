@@ -1244,7 +1244,7 @@ export default function App() {
 
         if (!updated) return;
 
-        if ((updated.estado === 'activa' || updated.estado === 'en_progreso' || updated.estado === 'aceptado') && updated.gruero_id) {
+        if (updated.estado === 'activa' || updated.estado === 'en_progreso' || updated.estado === 'aceptado') {
           setTowState('dispatched');
           setCitizenTab('home'); // Permanently activate tracking view map instantly
           
@@ -4194,20 +4194,6 @@ export default function App() {
     } : null);
     setTowState('dispatched');
 
-    let grueroId = null;
-    try {
-      const { data: qGruero } = await supabase
-        .from('grueros')
-        .select('id')
-        .eq('auth_id', sessionUser?.id)
-        .maybeSingle();
-      if (qGruero) {
-        grueroId = qGruero.id;
-      }
-    } catch (err) {
-      console.error("Error querying gruero uuid:", err);
-    }
-
     // Defensive DB Update in isolated try block so failures won't lock up UI transition
     try {
       // Also trigger initial message locally of driver to synchronize the chat
@@ -4233,7 +4219,7 @@ export default function App() {
         .from('asistencias_viales')
         .update({
           estado: 'activa',
-          gruero_id: grueroId || null
+          gruero_id: sessionUser?.id || null
         })
         .eq('id', acceptedJobId);
     } catch (err) {
@@ -4241,12 +4227,12 @@ export default function App() {
     }
 
     // Query or create units of this gruero in isolated defensive block
-    if (grueroId) {
+    if (sessionUser?.id) {
       try {
         const { data: craneUnit } = await supabase
           .from('unidades_grua')
           .select('*')
-          .eq('gruero_id', grueroId)
+          .eq('gruero_id', sessionUser.id)
           .maybeSingle();
         
         if (craneUnit) {
@@ -4256,7 +4242,7 @@ export default function App() {
           });
         } else {
           const newUnit = {
-            gruero_id: grueroId,
+            gruero_id: sessionUser.id,
             estado: 'en_ruta',
             lat_actual: 10.4900,
             lng_actual: -66.9100

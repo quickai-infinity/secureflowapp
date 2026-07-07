@@ -136,6 +136,10 @@ interface TowJob {
   longitude: number;
   price: number;
   distance: number;
+  driverName?: string;
+  driverPhone?: string;
+  vehiclePlate?: string;
+  gruero_id?: string;
 }
 
 // Support mapping both English and Spanish term variations to corresponding layouts
@@ -201,10 +205,13 @@ function RoadsideMap({ driverLat, driverLng, citizenLat, citizenLng }: { driverL
       if (!mapRef.current) return;
 
       try {
-        const dLat = Number(driverLat) || 10.4900;
-        const dLng = Number(driverLng) || -66.9100;
-        const cLat = Number(citizenLat) || 10.4984;
-        const cLng = Number(citizenLng) || -66.8824;
+        const dLat = Number(driverLat);
+        const dLng = Number(driverLng);
+        const cLat = Number(citizenLat);
+        const cLng = Number(citizenLng);
+
+        // BLOQUEO ESTRICTO: Si alguna coordenada es 0 (no hay GPS real), detener el mapa
+        if (dLat === 0 || dLng === 0 || cLat === 0 || cLng === 0) return;
 
         if (!mapInstanceRef.current) {
           // Initialize map once
@@ -338,14 +345,89 @@ function RoadsideMap({ driverLat, driverLng, citizenLat, citizenLng }: { driverL
   );
 }
 
+const CitizenPendingTowLoader = ({ 
+  assistId, 
+  onActive, 
+  onCancel 
+}: { 
+  assistId: string, 
+  onActive: (updatedRow: any) => void, 
+  onCancel: () => void 
+}) => {
+  useEffect(() => {
+    console.log("[POLLING] Active for assistance ID:", assistId);
+    let isMounted = true;
+    const interval = setInterval(async () => {
+      try {
+        const { data, error } = await supabase
+          .from('asistencias_viales')
+          .select('*')
+          .eq('id', assistId)
+          .maybeSingle();
+        
+        if (!isMounted) return;
+
+        if (!error && data) {
+          console.log("[POLLING] Status check:", data.estado);
+          if (data.estado === 'activa' || data.estado === 'en_progreso' || data.estado === 'aceptado') {
+            console.log("[POLLING] Active/en_progreso/aceptado status found!", data);
+            clearInterval(interval);
+            onActive(data);
+          } else if (data.estado === 'completado' || data.estado === 'cancelado') {
+            console.log("[POLLING] Finished or canceled. Clearing interval.");
+            clearInterval(interval);
+            onCancel();
+          }
+        }
+      } catch (err) {
+        console.error("Polling error:", err);
+      }
+    }, 2000);
+
+    return () => {
+      console.log("[POLLING] Cleaning up loader interval.");
+      isMounted = false;
+      clearInterval(interval);
+    };
+  }, [assistId]);
+
+  return (
+    <div className="flex-1 flex flex-col justify-center items-center bg-slate-950 p-6 text-center space-y-6 animate-fade-in min-h-[500px]" id="citizen-searching-fullscreen">
+      <div className="w-24 h-24 bg-yellow-500/10 border border-yellow-500/30 rounded-full flex items-center justify-center animate-pulse">
+        <span className="text-4xl">🚜</span>
+      </div>
+      <div className="space-y-2">
+        <h3 className="text-lg font-black text-yellow-500 uppercase tracking-wide">Despachando Unidad...</h3>
+        <p className="text-xs text-slate-300 max-w-xs mx-auto leading-relaxed">
+          Hemos notificado al operador de grúa en zona. Esperando confirmación de disponibilidad para iniciar el traslado. (Sincronización GPS backup activa)
+        </p>
+      </div>
+      <div className="w-48 bg-slate-800 rounded-full h-1.5 relative overflow-hidden">
+        <div className="bg-yellow-500 h-full rounded-full animate-sweep" style={{ width: '40%' }} />
+      </div>
+      <button
+        onClick={onCancel}
+        className="bg-red-950/60 border border-red-500/20 hover:bg-red-900/40 text-red-400 px-6 py-2.5 rounded-xl text-xs font-bold uppercase transition-all select-none font-mono"
+      >
+        ❌ Cancelar Solicitud
+      </button>
+    </div>
+  );
+};
+
 export default function App() {
   // Navigation & Role states
   const [activeDevice, setActiveDevice] = useState<'citizen' | 'lawyer' | 'driver' | 'admin' | 'landing' | 'ambulance' | 'medic'>('landing');
   const [citizenTab, setCitizenTab] = useState<'home' | 'agent' | 'profile'>('home');
   const [lawyerTab, setLawyerTab] = useState<'guardia' | 'agent' | 'history'>('guardia');
-  const [driverTab, setDriverTab] = useState<'vial' | 'agent'>('vial');
-  const [ambulanceTab, setAmbulanceTab] = useState<'servicio' | 'agent'>('servicio');
-  const [medicTab, setMedicTab] = useState<'guardia' | 'agent'>('guardia');
+  const [driverTab, setDriverTab] = useState<'vial' | 'agent' | 'dashboard'>('vial');
+  const [driverHistory, setDriverHistory] = useState<any[]>([]);
+  const [ambulanceTab, setAmbulanceTab] = useState<'servicio' | 'agent' | 'dashboard'>('servicio');
+  const [totalAmbulanceEarnings, setTotalAmbulanceEarnings] = useState<number>(0);
+  const [medicTab, setMedicTab] = useState<'guardia' | 'agent' | 'history'>('guardia');
+  const [totalMedicEarnings, setTotalMedicEarnings] = useState<number>(0);
+  const [medicHistory, setMedicHistory] = useState<any[]>([]);
+  
 
   // Driver support messages and input
   const [driverSupportMessages, setDriverSupportMessages] = useState<Message[]>([
@@ -374,6 +456,7 @@ export default function App() {
   const [authEmail, setAuthEmail] = useState<string>('');
   const [authPassword, setAuthPassword] = useState<string>('');
   const [isRegisterMode, setIsRegisterMode] = useState<boolean>(false);
+  const [selectedCity, setSelectedCity] = useState<string>('Caracas, Venezuela');
   const [isAuthLoading, setIsAuthLoading] = useState<boolean>(false);
   const [selectRole, setSelectRole] = useState<'citizen' | 'lawyer' | 'driver' | 'ambulance' | 'medic'>('citizen');
   
@@ -400,46 +483,25 @@ export default function App() {
     onCancel?: () => void;
   } | null>(null);
 
-  // Profiles (Simulating DB storage)
+// Profiles (Datos vacíos iniciales, se llenarán con la base de datos real)
   const [citizenProfile, setCitizenProfile] = useState<Profile>({
-    name: 'Jhon Mitre',
-    email: 'jhonmitre1990@gmail.com',
-    phone: '584241234567',
-    city: 'Caracas'
+    name: '', email: '', phone: '', city: ''
   });
   
   const [lawyerProfile, setLawyerProfile] = useState<Profile>({
-    name: 'Dra. María Mendoza',
-    email: 'mendoza.legal@secureflow.ve',
-    phone: '584129876543',
-    city: 'Caracas',
-    licenseNumber: 'INPRE-98.421',
-    specialty: 'Derecho Constitucional & Penal'
+    name: '', email: '', phone: '', city: '', licenseNumber: '', specialty: ''
   });
 
   const [driverProfile, setDriverProfile] = useState<Profile>({
-    name: 'Carlos Ruiz',
-    email: 'carlos.grua@secureflow.ve',
-    phone: '584165554433',
-    city: 'Caracas',
-    vehiclePlate: 'A92B45X'
+    name: '', email: '', phone: '', city: '', vehiclePlate: ''
   });
 
   const [ambulanceProfile, setAmbulanceProfile] = useState<Profile>({
-    name: 'Dr. Héctor Salas (Paramédico)',
-    email: 'salas.paramedico@secureflow.ve',
-    phone: '584145551122',
-    city: 'Caracas',
-    vehiclePlate: 'AMB-402X'
+    name: '', email: '', phone: '', city: '', vehiclePlate: ''
   });
 
   const [medicProfile, setMedicProfile] = useState<Profile>({
-    name: 'Dr. Luis Beltrán (Médico)',
-    email: 'beltran.med@secureflow.ve',
-    phone: '584125559988',
-    city: 'Caracas',
-    licenseNumber: 'MSAS-42.501',
-    specialty: 'Medicina Crítica & Emergencias'
+    name: '', email: '', phone: '', city: '', licenseNumber: '', specialty: ''
   });
 
   // Flow State Engines (Simulating fully synced backend communication)
@@ -477,9 +539,10 @@ export default function App() {
   const [lawyerAgentInput, setLawyerAgentInput] = useState('');
 
   // AI assistant states for Paramedic and Doctor
-  const [ambulanceAgentMessages, setAmbulanceAgentMessages] = useState<Message[]>([]);
+  const [ambulanceAgentMessages, setAmbulanceAgentMessages] = useState<Message[]>([
+    { sender: 'bot', text: '🚑 Central IA: Conectado al sistema. Describe el escenario clínico, lesiones o consulta protocolos prehospitalarios de emergencia.', time: '00:00' }
+  ]);
   const [ambulanceAgentInput, setAmbulanceAgentInput] = useState('');
-
   const [medicAgentMessages, setMedicAgentMessages] = useState<Message[]>([]);
   const [medicAgentInput, setMedicAgentInput] = useState('');
 
@@ -509,7 +572,7 @@ export default function App() {
   const [isTowDailyCoActive, setIsTowDailyCoActive] = useState<boolean>(false);
   const [towDailyCoUrl, setTowDailyCoUrl] = useState<string>('');
   const [activeVialAssist, setActiveVialAssist] = useState<any | null>(null);
-  const [craneUnitState, setCraneUnitState] = useState<{ lat_actual: number, lng_actual: number } | null>({ lat_actual: 10.4900, lng_actual: -66.9100 });
+  const [craneUnitState, setCraneUnitState] = useState<{ lat_actual: number, lng_actual: number } | null>(null);
 
   // Tow Truck State Engine - Online and Ready by Default
   const [towState, setTowState] = useState<'idle' | 'calculating' | 'proposed' | 'dispatched' | 'completed'>('idle');
@@ -520,8 +583,46 @@ export default function App() {
   const [ambulanceBalanceClean, setAmbulanceBalanceClean] = useState<number>(0.00);
   const [medicBalanceClean, setMedicBalanceClean] = useState<number>(0.00);
   const [showBinanceModal, setShowBinanceModal] = useState(false);
-  const [towDriverCoords, setTowDriverCoords] = useState<{lat: number, lng: number}>({lat: 10.4900, lng: -66.9100});
-  const citizenCoords = {lat: 10.4850, lng: -66.9030};
+
+  // Tariffs State managed dynamically from Supabase config_tarifas
+  const [tariffs, setTariffs] = useState<{ [key: string]: { tarifa_base: number; precio_por_km: number } }>({
+    grua: { tarifa_base: 30.00, precio_por_km: 4.50 },
+    medico: { tarifa_base: 20.00, precio_por_km: 0.00 },
+    abogado: { tarifa_base: 15.00, precio_por_km: 0.00 }
+  });
+
+  useEffect(() => {
+    const fetchConfigTarifas = async () => {
+      try {
+        const { data, error } = await supabase.from('config_tarifas').select('*');
+        if (!error && data && data.length > 0) {
+          const updatedTariffs = {
+            grua: { tarifa_base: 30.00, precio_por_km: 4.50 },
+            medico: { tarifa_base: 20.00, precio_por_km: 0.00 },
+            abogado: { tarifa_base: 15.00, precio_por_km: 0.00 }
+          };
+          data.forEach((row: any) => {
+            const svc = row.tipo_servicio;
+            if (svc === 'grua' || svc === 'medico' || svc === 'abogado') {
+              updatedTariffs[svc] = {
+                tarifa_base: row.tarifa_base !== null && row.tarifa_base !== undefined ? Number(row.tarifa_base) : updatedTariffs[svc].tarifa_base,
+                precio_por_km: row.precio_por_km !== null && row.precio_por_km !== undefined ? Number(row.precio_por_km) : updatedTariffs[svc].precio_por_km
+              };
+            }
+          });
+          setTariffs(updatedTariffs);
+          console.log("[CONFIG_TARIFAS] Dynamic rates loaded:", updatedTariffs);
+        } else {
+          console.log("[CONFIG_TARIFAS] Standard rates configured successfully:", tariffs);
+        }
+      } catch (err) {
+        console.error("Exception loading config_tarifas:", err);
+      }
+    };
+    fetchConfigTarifas();
+  }, []);
+  const [towDriverCoords, setTowDriverCoords] = useState<{lat: number, lng: number}>({lat: 0, lng: 0});
+  const [citizenCoords, setCitizenCoords] = useState<{lat: number, lng: number}>({lat: 0, lng: 0});
   const [towMessages, setTowMessages] = useState<Message[]>([]);
   const [towChatInput, setTowChatInput] = useState('');
   const [driverChatInput, setDriverChatInput] = useState('');
@@ -552,6 +653,23 @@ export default function App() {
   // Refs for auto scrolling
   const agentScrollRef = useRef<HTMLDivElement>(null);
   const towChatScrollRef = useRef<HTMLDivElement>(null);
+
+  // Sync ref to prevent stale closures in stable real-time effects
+  const towStateRef = useRef(towState);
+  useEffect(() => {
+    towStateRef.current = towState;
+  }, [towState]);
+
+  const activeTowJobRef = useRef(activeTowJob);
+  useEffect(() => {
+    activeTowJobRef.current = activeTowJob;
+  }, [activeTowJob]);
+
+  useEffect(() => {
+    if (tariffs.abogado) {
+      setSosCostRate(tariffs.abogado.tarifa_base);
+    }
+  }, [tariffs]);
 
   // Trigger visual alert modal simulation
   const showMaterialAlert = (title: string, message: string, onConfirm?: () => void) => {
@@ -762,13 +880,13 @@ export default function App() {
         .eq('auth_id', resolvedUserId)
         .maybeSingle();
 
-      if (grueroData) {
+   if (grueroData) {
         setDriverProfile({
           name: grueroData.nombre_completo,
           email: resolvedEmail,
           phone: grueroData.telefono || '',
-          city: 'Caracas',
-          vehiclePlate: grueroData.placa_vehiculo || 'A92B45X'
+          city: grueroData.ciudad || 'No especificada',
+          vehiclePlate: grueroData.placa_vehiculo || 'Sin Placa'
         });
 
         // Load gruero balance
@@ -820,15 +938,49 @@ export default function App() {
         return;
       }
 
-      // 4. TERCERA VERIFICACIÓN (Ciudadanos y otros): Solo si las dos anteriores fallaron (fueron null)
+      // 4. TERCERA VERIFICACIÓN (Médicos / Medic)
+      const { data: medicoData } = await supabase
+        .from('medicos')
+        .select('*')
+        .eq('auth_id', resolvedUserId)
+        .maybeSingle();
+
+      if (medicoData) {
+        setMedicProfile({
+          name: medicoData.nombre_completo,
+          email: resolvedEmail,
+          phone: medicoData.telefono || '',
+          city: medicoData.ciudad || 'No especificada',
+          licenseNumber: medicoData.licencia_medica || 'MSAS-PENDIENTE',
+          specialty: medicoData.especialidad || 'Medicina General y Triaje'
+        });
+
+        const { data: sm } = await supabase
+          .from('saldos_medicos')
+          .select('balance')
+          .eq('user_id', resolvedUserId)
+          .maybeSingle();
+        if (sm) {
+          setMedicBalanceClean(Number(sm.balance) || 0.00);
+        }
+
+        setActiveDevice('medic');
+        return;
+      }
+
+      // 5. CUARTA VERIFICACIÓN (Ciudadanos y otros): Solo si las anteriores fallaron
       const { data: userData } = await supabase
         .from('usuarios')
         .select('*')
         .or(`auth_id.eq.${resolvedUserId},id.eq.${resolvedUserId}`)
         .maybeSingle();
 
-      if (userData) {
-        let rawRole = userData.rol || userData.role || '';
+      let finalUserData = userData;
+
+
+
+      if (finalUserData) {
+        let rawRole = finalUserData.rol || finalUserData.role || '';
         if (!rawRole) {
           const { data: sessionData } = await supabase.auth.getSession();
           const userMeta = sessionData?.session?.user?.user_metadata;
@@ -841,29 +993,29 @@ export default function App() {
 
         if (finalRole === 'citizen') {
           setCitizenProfile({
-            name: userData.nombre_completo,
+            name: finalUserData.nombre_completo,
             email: resolvedEmail,
-            phone: userData.contacto_emergencia_1_telefono || '',
+            phone: finalUserData.contacto_emergencia_1_telefono || '',
             city: 'Caracas'
           });
-          const vSel = userData.vehicle_selection || userData.tipo_vehiculo;
+          const vSel = finalUserData.vehicle_selection || finalUserData.tipo_vehiculo;
           if (vSel) {
             setCitizenVehicleType(vSel as 'coche' | 'moto');
             localStorage.setItem('secureflow_vehicle_type', vSel);
           }
-          if (userData.contacto_emergencia_1_nombre || userData.contacto_emergencia_1_telefono) {
+          if (finalUserData.contacto_emergencia_1_nombre || finalUserData.contacto_emergencia_1_telefono) {
             setAlertContacts({
-              name1: userData.contacto_emergencia_1_nombre || 'Mi Madre',
-              tel1: userData.contacto_emergencia_1_telefono || '584249998877',
-              name2: userData.contacto_emergencia_2_nombre || 'Mi Hermano',
-              tel2: userData.contacto_emergencia_2_telefono || '584126665544'
+              name1: finalUserData.contacto_emergencia_1_nombre || 'Mi Madre',
+              tel1: finalUserData.contacto_emergencia_1_telefono || '584249998877',
+              name2: finalUserData.contacto_emergencia_2_nombre || 'Mi Hermano',
+              tel2: finalUserData.contacto_emergencia_2_telefono || '584126665544'
             });
           }
         } else if (finalRole === 'ambulance') {
           setAmbulanceProfile({
-            name: userData.nombre_completo,
+            name: finalUserData.nombre_completo,
             email: resolvedEmail,
-            phone: userData.contacto_emergencia_1_telefono || '',
+            phone: finalUserData.contacto_emergencia_1_telefono || '',
             city: 'Caracas',
             vehiclePlate: 'AMB-402X'
           });
@@ -877,9 +1029,9 @@ export default function App() {
           }
         } else if (finalRole === 'medic') {
           setMedicProfile({
-            name: userData.nombre_completo,
+            name: finalUserData.nombre_completo,
             email: resolvedEmail,
-            phone: userData.contacto_emergencia_1_telefono || '',
+            phone: finalUserData.contacto_emergencia_1_telefono || '',
             city: 'Caracas',
             licenseNumber: 'MSAS-42.501',
             specialty: 'Medicina Crítica & Emergencias'
@@ -908,14 +1060,39 @@ export default function App() {
           setActivePlan(saldoData.plan_activo as any);
           setConsultsUsed(Number(saldoData.consultas_ia_usadas));
         }
-      } else {
-        // Fallback for unauthorized / unmapped users
-        setActiveDevice('citizen');
+   } else {
+                // Fallback for unauthorized / unmapped users
+                // PREVENCIÓN DE PARPADEO: No forzar el panel ciudadano si el usuario se acaba de registrar (hace menos de 15 segundos)
+                const isNewUser = authUser?.created_at && (new Date().getTime() - new Date(authUser.created_at).getTime() < 15000);
+                if (!isNewUser) {
+                  setActiveDevice('citizen');
+                }
+              }
+            } catch (e) {
+              console.error("Error loading profile from DB sequentially: ", e);
+            }
+          };
+  // Sincronización del Historial de Ganancias del Gruero
+  useEffect(() => {
+    if (!sessionUser || activeDevice !== 'driver') return;
+    const fetchDriverHistory = async () => {
+      try {
+        const { data: hist, error } = await supabase
+          .from('historial_comisiones')
+          .select('*')
+          .eq('profesional_id', sessionUser.id)
+          .eq('tipo_servicio', 'grua')
+          .order('created_at', { ascending: false });
+
+        if (!error && hist) {
+          setDriverHistory(hist);
+        }
+      } catch (err) {
+        console.error("Error obteniendo el historial del gruero:", err);
       }
-    } catch (e) {
-      console.error("Error loading profile from DB sequentially: ", e);
-    }
-  };
+    };
+    fetchDriverHistory();
+  }, [sessionUser, activeDevice, towState]);
 
   // Real-time listener for lawyers to automatically receive incoming SOS emergencies
   useEffect(() => {
@@ -1002,44 +1179,199 @@ export default function App() {
     };
   }, [activeDevice, sessionUser?.id]);
 
-  // Real-time listener for the citizen to sync the crane request status and chat messages from Supabase
+  // Effect to fetch and restore any active, pending, or en_progreso tow service for the citizen on mount or role swap
+  useEffect(() => {
+    if (activeDevice !== 'citizen' || !sessionUser?.id) return;
+
+    let active = true;
+
+    const restoreCitizenTowJob = async () => {
+      try {
+        const { data: activeList } = await supabase
+          .from('asistencias_viales')
+          .select('*')
+          .in('estado', ['pendiente', 'activa', 'en_progreso'])
+          .eq('ciudadano_id', sessionUser.id)
+          .order('created_at', { ascending: false });
+
+        if (!active) return;
+
+        if (activeList && activeList.length > 0) {
+          const assist = activeList[0];
+          
+          let dName = 'Operador Asignado';
+          let dPhone = 'No phone';
+          let gId = assist.gruero_id;
+          let vPlate = 'Por Asignar';
+          
+          if (gId) {
+            const { data: grueroRow } = await supabase
+              .from('grueros')
+              .select('nombre_completo, telefono, placa_vehiculo')
+              .eq('id', gId)
+              .maybeSingle();
+            if (active && grueroRow) {
+              dName = grueroRow.nombre_completo;
+              dPhone = grueroRow.telefono;
+              vPlate = grueroRow.placa_vehiculo || 'Por Asignar';
+            }
+          }
+
+          const baseFee = tariffs.grua?.tarifa_base ?? 30.00;
+          const kmRate = tariffs.grua?.precio_por_km ?? 4.50;
+          
+          // Calculate distance matching what was saved
+          const distanceInKm = 5.4; // default
+          const distMeters = assist.distancia_metros || Math.round(distanceInKm * 1000);
+
+          const restoredJob: TowJob = {
+            id: assist.id,
+            citizenName: citizenProfile.name || 'Ciudadano',
+            citizenPhone: citizenProfile.phone || 'No phone',
+            status: assist.estado === 'pendiente' ? 'pending' : 'en_route',
+            latitude: Number(assist.ubicacion_origen_lat) || citizenCoords.lat,
+            longitude: Number(assist.ubicacion_origen_lng) || citizenCoords.lng,
+            price: Number(assist.costo_total) || (baseFee + (distMeters / 1000) * kmRate),
+            distance: distMeters,
+            driverName: dName,
+            driverPhone: dPhone,
+            vehiclePlate: vPlate,
+            gruero_id: gId
+          };
+
+          if (active) {
+            setActiveTowJob(restoredJob);
+            setActiveVialAssist(assist);
+            
+            if (assist.estado === 'activa' || assist.estado === 'en_progreso') {
+              setTowState('dispatched');
+              setCitizenTab('home');
+            } else {
+              setTowState('proposed'); // proposed corresponds to pending / 'pendiente' load screen
+            }
+            console.log("[CITIZEN TARIFF RECOVERY] Successfully restored active assistance:", assist.id, assist.estado);
+          }
+        }
+      } catch (err) {
+        console.error("Error restoring citizen tow job:", err);
+      }
+    };
+
+    restoreCitizenTowJob();
+
+    return () => {
+      active = false;
+    };
+  }, [activeDevice, sessionUser?.id, tariffs]);
+
+  // Real-time listener and fallback query for the citizen to sync the crane request status from Supabase
   useEffect(() => {
     if (activeDevice !== 'citizen' || !activeTowJob) return;
 
-    const channel = supabase
-      .channel(`tow-${activeTowJob.id}`)
-      .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'asistencias_viales', filter: `id=eq.${activeTowJob.id}` }, async (payload) => {
-        const updated = payload.new;
-        if (updated.estado === 'activa') {
+    let active = true;
+
+const checkTowStatusUpdate = async (updatedObj?: any) => {
+
+      try {
+        let updated = updatedObj;
+        if (!updated) {
+          const { data, error } = await supabase
+            .from('asistencias_viales')
+            .select('*')
+            .eq('id', activeTowJob.id)
+            .maybeSingle();
+
+          if (!error && data) {
+            updated = data;
+          }
+        }
+
+        if (!updated) return;
+
+        if (updated.estado === 'activa' || updated.estado === 'en_progreso' || updated.estado === 'aceptado') {
           setTowState('dispatched');
+          setCitizenTab('home'); // Permanently activate tracking view map instantly
+          
+          let drName = updated.driverName || 'Operador Asignado';
+          let drPhone = updated.driverPhone || 'Desconocido';
+          let vPlate = updated.vehiclePlate || 'Sin Placa';
+
           if (updated.gruero_id) {
             const { data: grueroRow } = await supabase
               .from('grueros')
-              .select('nombre_completo, telefono')
+              .select('nombre_completo, telefono, placa_vehiculo')
               .eq('id', updated.gruero_id)
               .maybeSingle();
 
-            setActiveTowJob(prev => prev ? {
-              ...prev,
-              status: 'en_route',
-              driverName: grueroRow?.nombre_completo || 'Asignado',
-              driverPhone: grueroRow?.telefono || ''
-            } : null);
+            if (grueroRow) {
+              drName = grueroRow.nombre_completo || drName;
+              drPhone = grueroRow.telefono || drPhone;
+              vPlate = grueroRow.placa_vehiculo || vPlate;
+            }
+          }
+
+          if (active) {
+            setActiveVialAssist(updated);
+            setActiveTowJob(prev => {
+              if (prev && (prev.status !== 'en_route' || prev.gruero_id !== updated.gruero_id || prev.vehiclePlate !== vPlate)) {
+                return {
+                  ...prev,
+                  status: 'en_route',
+                  driverName: drName,
+                  driverPhone: drPhone,
+                  vehiclePlate: vPlate,
+                  gruero_id: updated.gruero_id
+                };
+              }
+              return prev;
+            });
           }
         } else if (updated.estado === 'completado') {
-          // Resolved successfully
-          setTowState('idle');
-          setActiveTowJob(null);
-          const rate = Number(updated.costo_total) || 28.50;
-          setCitizenBalance(b => Math.max(0, b - rate));
-          showMaterialAlert('🚜 Traslado Concluido', `La unidad de grúa ha completado el traslado. Se debitaron $${rate.toFixed(2)} USD de tu saldo del seguro.`);
-          channel.unsubscribe();
+          if (active) {
+            setTowState('idle');
+            setActiveTowJob(null);
+            setActiveVialAssist(null);
+            const rate = Number(updated.costo_total) || 28.50;
+            setCitizenBalance(b => Math.max(0, b - rate));
+            showMaterialAlert('🚜 Traslado Concluido', `La unidad de grúa ha completado el traslado. Se debitaron $${rate.toFixed(2)} USD de tu saldo del seguro.`);
+          }
+        } else if (updated.estado === 'cancelado') {
+          if (active) {
+            setTowState('idle');
+            setActiveTowJob(null);
+            setActiveVialAssist(null);
+            showMaterialAlert('🚜 Traslado Cancelado', 'El servicio de asistencia vial de grúa ha sido cancelado.');
+          }
+        }
+      } catch (err) {
+        console.error("Error checking tow status in citizen panel:", err);
+      }
+    };
+
+    // Run status check immediately
+    checkTowStatusUpdate();
+
+    // Setup Realtime subscription channels for asistencias_viales table only
+    const channelVial = supabase
+      .channel(`tow-vial-${activeTowJob.id}`)
+      .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'asistencias_viales', filter: `id=eq.${activeTowJob.id}` }, async (payload) => {
+        if (active) {
+          checkTowStatusUpdate(payload.new);
         }
       })
       .subscribe();
 
+    // Constant fallback interval checking every 2 seconds to guarantee responsiveness
+    const interval = setInterval(() => {
+      if (active) {
+        checkTowStatusUpdate();
+      }
+    }, 2000);
+
     return () => {
-      supabase.removeChannel(channel);
+      active = false;
+      clearInterval(interval);
+      supabase.removeChannel(channelVial);
     };
   }, [activeDevice, activeTowJob?.id]);
 
@@ -1109,21 +1441,35 @@ export default function App() {
     };
   }, [activeTowJob?.id, activeVialAssist?.id]);
 
-  // Periodically track the crane's position from 'unidades_grua' table if dispatched
+  // Subscribe to and periodically track the crane's position from 'unidades_grua' table
   useEffect(() => {
-    if (towState !== 'dispatched' || !activeTowJob) return;
+    const isCitizenActive = !!activeTowJob && (
+      towState === 'dispatched' || 
+      activeTowJob.status === 'en_route' || 
+      activeTowJob.status === 'active' || 
+      activeTowJob.gruero_id || 
+      activeVialAssist?.estado === 'activa' || 
+      activeVialAssist?.estado === 'en_progreso' || 
+      activeVialAssist?.gruero_id
+    );
+    if (!isCitizenActive || !activeTowJob) return;
 
     let active = true;
+    let channel: any = null;
 
     const fetchCraneLocation = async () => {
       try {
-        const { data: assist } = await supabase
-          .from('asistencias_viales')
-          .select('gruero_id')
-          .eq('id', activeTowJob.id)
-          .maybeSingle();
+        let gId = activeTowJob.gruero_id || activeVialAssist?.gruero_id;
+        
+        if (!gId) {
+          const { data: assist } = await supabase
+            .from('asistencias_viales')
+            .select('gruero_id')
+            .eq('id', activeTowJob.id)
+            .maybeSingle();
+          gId = assist?.gruero_id;
+        }
 
-        const gId = assist?.gruero_id;
         if (gId) {
           const { data: unit } = await supabase
             .from('unidades_grua')
@@ -1132,10 +1478,38 @@ export default function App() {
             .maybeSingle();
 
           if (unit && active) {
-            setCraneUnitState({
-              lat_actual: Number(unit.lat_actual) || 10.4900,
-              lng_actual: Number(unit.lng_actual) || -66.9100
-            });
+            const dLat = Number(unit.lat_actual);
+            const dLng = Number(unit.lng_actual);
+            
+            if (!isNaN(dLat) && !isNaN(dLng) && dLat !== 0 && dLng !== 0) {
+              setCraneUnitState({ lat_actual: dLat, lng_actual: dLng });
+              setTowDriverCoords({ lat: dLat, lng: dLng });
+            }
+          }
+
+          if (!channel && active) {
+            channel = supabase
+              .channel(`crane-location-${gId}`)
+              .on(
+                'postgres_changes',
+                {
+                  event: 'UPDATE',
+                  schema: 'public',
+                  table: 'unidades_grua',
+                  filter: `gruero_id=eq.${gId}`
+                },
+                (payload) => {
+                  if (active && payload.new) {
+                    const latVal = Number(payload.new.lat_actual);
+                    const lngVal = Number(payload.new.lng_actual);
+                    if (!isNaN(latVal) && !isNaN(lngVal) && latVal !== 0 && lngVal !== 0) {
+                      setCraneUnitState({ lat_actual: latVal, lng_actual: lngVal });
+                      setTowDriverCoords({ lat: latVal, lng: lngVal });
+                    }
+                  }
+                }
+              )
+              .subscribe();
           }
         }
       } catch (err) {
@@ -1144,470 +1518,843 @@ export default function App() {
     };
 
     fetchCraneLocation();
+    
+    // Fast polling fallback to ensure robust syncs
     const interval = setInterval(() => {
       if (active) fetchCraneLocation();
-    }, 5000);
+    }, 2500);
 
     return () => {
       active = false;
       clearInterval(interval);
+      if (channel) {
+        supabase.removeChannel(channel);
+      }
     };
-  }, [towState, activeTowJob?.id]);
+  }, [towState, activeTowJob?.id, activeTowJob?.gruero_id, activeVialAssist?.estado, activeVialAssist?.gruero_id]);
 
-  // Real-time listener for the citizen to sync the lawyer/SOS call status and chat messages from Supabase
+  // Driver subscribes to and polls Citizen location from DB in real-time
   useEffect(() => {
-    if (activeDevice !== 'citizen' || !activeEmergency) return;
+    if (activeDevice !== 'driver' || towState !== 'dispatched' || !activeTowJob) return;
 
-    const channel = supabase
-      .channel(`citizen-lawyer-${activeEmergency.id}`)
-      .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'emergencias_activas', filter: `id=eq.${activeEmergency.id}` }, (payload) => {
-        const updated = payload.new;
-        if (updated.estado === 'active' || updated.estado === 'activa') {
-          setSosState('active');
-          setIsLiveVideoActive(true);
-          setIsLawyerDailyCoActive(true);
-          // Actualizamos la URL real de la sala desde el payload de Supabase
-          setActiveEmergency(prev => {
-            if (!prev) return null;
-            const liveUrl = updated.daily_room_url || updated.sala_webrtc_url || prev.dailyRoomUrl;
-            console.log('[CITIZEN REALTIME SYNC] Sincronizando URL real de la sala:', liveUrl);
-            return {
-              ...prev,
-              dailyRoomUrl: liveUrl
-            };
-          });
-        } else if (updated.estado === 'completed' || updated.estado === 'resuelta') {
-          setIsLiveVideoActive(false);
-          setSosState('idle');
-          setActiveEmergency(null);
-          const rate = Number(updated.tarifa_aplicada) || 30.00;
-          setCitizenBalance(b => Math.max(0, b - rate));
-          showMaterialAlert('⚖️ Amparo Concluido', `Procedimiento terminado con éxito. Se debitaron $${rate} USD por asistencia legal certificada.`);
-          channel.unsubscribe();
-        }
-      })
-      .subscribe();
+    let active = true;
+    let channel: any = null;
 
-    return () => {
-      supabase.removeChannel(channel);
-    };
-  }, [activeDevice, activeEmergency?.id]);
-
-  // Real-time listener for the citizen to sync the doctor teleconsultation status and chat messages
-  useEffect(() => {
-    if (activeDevice !== 'citizen' || !activeMedicEmergency) return;
-
-    const channel = supabase
-      .channel(`citizen-medic-${activeMedicEmergency.id}`)
-      .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'emergencias_activas', filter: `id=eq.${activeMedicEmergency.id}` }, (payload) => {
-        const updated = payload.new;
-        if (updated.estado === 'active' || updated.estado === 'activa') {
-          setMedicState('active');
-          setIsMedicWindowOpen(true);
-          setIsMedicDailyCoActive(true);
-          triggerPush('🏥 Doctor Conectado', 'El médico de guardia ha aceptado tu caso y ya está conectado.');
-        } else if (updated.estado === 'completed' || updated.estado === 'resuelta') {
-          setMedicState('idle');
-          setActiveMedicEmergency(null);
-          setIsMedicWindowOpen(false);
-          const rate = Number(updated.tarifa_aplicada) || 20.00;
-          setCitizenBalance(b => Math.max(0, b - rate));
-          showMaterialAlert('🩺 Consulta Concluida', 'El médico de guardia ha finalizado la sesión de teleconsulta.');
-          channel.unsubscribe();
-        }
-      })
-      .subscribe();
-
-    return () => {
-      supabase.removeChannel(channel);
-    };
-  }, [activeDevice, activeMedicEmergency?.id]);
-
-  // Real-time listener for the citizen to sync the ambulance dispatch status and chat messages
-  useEffect(() => {
-    if (activeDevice !== 'citizen' || !activeAmbulanceJob) return;
-
-    const channel = supabase
-      .channel(`citizen-ambulance-${activeAmbulanceJob.id}`)
-      .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'emergencias_activas', filter: `id=eq.${activeAmbulanceJob.id}` }, (payload) => {
-        const updated = payload.new;
-        if (updated.estado === 'dispatched' || updated.estado === 'activa') {
-          setAmbulanceState('dispatched');
-          setIsAmbulanceWindowOpen(true);
-          triggerPush('🚑 Auxilio en Camino', 'La unidad de paramédicos de resguardo ha iniciado ruta oficial hacia tu ubicación.');
-        } else if (updated.estado === 'completed' || updated.estado === 'resuelta') {
-          setAmbulanceState('idle');
-          setActiveAmbulanceJob(null);
-          setIsAmbulanceWindowOpen(false);
-          const rate = Number(updated.tarifa_aplicada) || 35.00;
-          setCitizenBalance(b => Math.max(0, b - rate));
-          showMaterialAlert('🚑 Traslado Concluido', 'La ambulancia ha finalizado el caso.');
-          channel.unsubscribe();
-        }
-      })
-      .subscribe();
-
-    return () => {
-      supabase.removeChannel(channel);
-    };
-  }, [activeDevice, activeAmbulanceJob?.id]);
-
-  // Real-time listener for tow truck drivers to receive crane requests and sync chat messages
-  useEffect(() => {
-    if (activeDevice !== 'driver') return;
-
-    const fetchCallingTows = async () => {
-      // 1. Fetch any active crane dispatches in Calling status
-      const { data: callingData } = await supabase
-        .from('emergencias_activas')
-        .select('*')
-        .eq('estado', 'buscando');
-
-      const filteredTow = callingData?.filter(e => !e.sala_webrtc_url) || [];
-      if (filteredTow.length > 0) {
-        const active = filteredTow[0];
-        const { data: userData } = await supabase
-          .from('usuarios')
-          .select('nombre_completo, contacto_emergencia_1_telefono')
-          .eq('id', active.ciudadano_id)
+    const fetchCitizenLocation = async () => {
+      try {
+        const { data: assist, error } = await supabase
+          .from('asistencias_viales')
+          .select('ubicacion_origen_lat, ubicacion_origen_lng')
+          .eq('id', activeTowJob.id)
           .maybeSingle();
 
-        const cName = userData?.nombre_completo || 'Ciudadano';
-        const cPhone = userData?.contacto_emergencia_1_telefono || '';
-        const distance = 3450;
+        if (error || !assist) return;
 
-        if (towState === 'idle') {
-          setTowState('proposed');
-          setActiveTowJob({
-            id: active.id,
-            citizenName: cName,
-            citizenPhone: cPhone,
-            status: 'pending',
-            latitude: Number(active.ubicacion_lat),
-            longitude: Number(active.ubicacion_lng),
-            price: Number(active.tarifa_aplicada),
-            distance: distance
-          });
-        }
-        return;
-      }
-
-      // 2. Fetch our currently active ongoing tow job if we are logged in and already accepted it
-      if (sessionUser) {
-        const { data: activeList } = await supabase
-          .from('emergencias_activas')
-          .select('*')
-          .eq('estado', 'activa')
-          .eq('abogado_id', sessionUser.id);
-
-        if (activeList && activeList.length > 0) {
-          const active = activeList[0];
-          const { data: userData } = await supabase
-            .from('usuarios')
-            .select('nombre_completo, contacto_emergencia_1_telefono')
-            .eq('id', active.ciudadano_id)
-            .maybeSingle();
-
-          const cName = userData?.nombre_completo || 'Ciudadano';
-          const cPhone = userData?.contacto_emergencia_1_telefono || '';
-          const distance = 3450;
-
-          setTowState('dispatched');
-          setActiveTowJob({
-            id: active.id,
-            citizenName: cName,
-            citizenPhone: cPhone,
-            status: 'en_route',
-            latitude: Number(active.ubicacion_lat),
-            longitude: Number(active.ubicacion_lng),
-            price: Number(active.tarifa_aplicada),
-            distance: distance
-          });
-        } else {
-          // No calling or active job
-          if (towState !== 'idle') {
-            setTowState('idle');
-            setActiveTowJob(null);
-          }
-        }
-      }
-    };
-
-    fetchCallingTows();
-
-    const channel = supabase
-      .channel('driver-panel-sync')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'emergencias_activas' }, () => {
-        fetchCallingTows();
-      })
-      .subscribe();
-
-    return () => {
-      supabase.removeChannel(channel);
-    };
-  }, [activeDevice, towState, sessionUser?.id]);
-
-  // EFECTO NUEVO Y AISLADO: Escucha exclusivamente inserts en 'asistencias_viales' con estado 'pendiente'
-  useEffect(() => {
-    if (activeDevice !== 'driver') return;
-
-    const fetchPendingVialAssistances = async () => {
-      try {
-        const { data: pendingVials, error } = await supabase
-          .from('asistencias_viales')
-          .select('*')
-          .eq('estado', 'pendiente');
-
-        if (!error && pendingVials && pendingVials.length > 0) {
-          const assist = pendingVials[0];
-          
-          // Obtener datos del ciudadano
-          const { data: userData } = await supabase
-            .from('usuarios')
-            .select('nombre_completo, contacto_emergencia_1_telefono')
-            .eq('id', assist.ciudadano_id)
-            .maybeSingle();
-
-          const cName = userData?.nombre_completo || 'Ciudadano';
-          const cPhone = userData?.contacto_emergencia_1_telefono || '';
-
-          // Coordenadas destino e inicio
-          const destCoords = getCoordsFromText(assist.ubicacion_destino_texto || 'Plaza Venezuela');
-          const calculatedKm = calculateDistanceInKm(
-            Number(assist.ubicacion_origen_lat),
-            Number(assist.ubicacion_origen_lng),
-            destCoords.lat,
-            destCoords.lng
-          );
-
-          if (towState === 'idle') {
-            setTowState('proposed');
-            setActiveTowJob({
-              id: assist.id,
-              citizenName: cName,
-              citizenPhone: cPhone,
-              status: 'pending',
-              latitude: Number(assist.ubicacion_origen_lat),
-              longitude: Number(assist.ubicacion_origen_lng),
-              price: Number(assist.costo_total),
-              distance: Math.round(calculatedKm * 1000)
-            });
-            setActiveVialAssist(assist);
+        if (active) {
+          const lat = Number(assist.ubicacion_origen_lat);
+          const lng = Number(assist.ubicacion_origen_lng);
+          if (!isNaN(lat) && !isNaN(lng)) {
+            setActiveTowJob(prev => prev ? {
+              ...prev,
+              latitude: lat,
+              longitude: lng
+            } : null);
           }
         }
       } catch (err) {
-        console.error("Error en fetchPendingVialAssistances:", err);
+        console.error("Error in driver fetching citizen coordinates:", err);
       }
     };
 
-    fetchPendingVialAssistances();
+    fetchCitizenLocation();
 
-    const channel = supabase
-      .channel('vial-assistance-inserts-isolated')
+    // Subscribe to UPDATE events on asistencias_viales
+    channel = supabase
+      .channel(`driver-citizen-track-${activeTowJob.id}`)
       .on(
         'postgres_changes',
-        { event: 'INSERT', schema: 'public', table: 'asistencias_viales' },
+        {
+          event: 'UPDATE',
+          schema: 'public',
+          table: 'asistencias_viales',
+          filter: `id=eq.${activeTowJob.id}`
+        },
         (payload) => {
-          if (payload.new && payload.new.estado === 'pendiente') {
-            fetchPendingVialAssistances();
-          }
-        }
-      )
-      .on(
-        'postgres_changes',
-        { event: 'UPDATE', schema: 'public', table: 'asistencias_viales' },
-        (payload) => {
-          if (payload.new && (payload.new.estado === 'pendiente' || payload.new.estado === 'activa')) {
-            fetchPendingVialAssistances();
+          if (active && payload.new) {
+            const lat = Number(payload.new.ubicacion_origen_lat);
+            const lng = Number(payload.new.ubicacion_origen_lng);
+            if (!isNaN(lat) && !isNaN(lng)) {
+              setActiveTowJob(prev => prev ? {
+                ...prev,
+                latitude: lat,
+                longitude: lng
+              } : null);
+            }
           }
         }
       )
       .subscribe();
 
+    // Polling fallback helper every 2.5 seconds
+    const interval = setInterval(() => {
+      if (active) fetchCitizenLocation();
+    }, 2500);
+
     return () => {
-      supabase.removeChannel(channel);
-    };
-  }, [activeDevice, towState]);
-
-  // Real-time synchronization for Ambulance Paramedic Panel
-  useEffect(() => {
-    if (activeDevice !== 'ambulance') return;
-
-    const fetchCallingAmbulances = async () => {
-      const { data: callingData } = await supabase
-        .from('emergencias_activas')
-        .select('*')
-        .eq('estado', 'buscando');
-
-      const filteredAmbulance = callingData?.filter(e => e.sala_webrtc_url && e.sala_webrtc_url.includes('Ambulance')) || [];
-      if (filteredAmbulance.length > 0) {
-        const active = filteredAmbulance[0];
-        const { data: userData } = await supabase
-          .from('usuarios')
-          .select('nombre_completo, contacto_emergencia_1_telefono')
-          .eq('id', active.ciudadano_id)
-          .maybeSingle();
-
-        const cName = userData?.nombre_completo || 'Ciudadano';
-        const cPhone = userData?.contacto_emergencia_1_telefono || '';
-        const distance = 2100;
-
-        if (ambulanceState === 'idle') {
-          setAmbulanceState('proposed');
-          setActiveAmbulanceJob({
-            id: active.id,
-            citizenName: cName,
-            citizenPhone: cPhone,
-            latitude: Number(active.ubicacion_lat),
-            longitude: Number(active.ubicacion_lng),
-            price: Number(active.tarifa_aplicada),
-            distance: distance
-          });
-        }
-        return;
+      active = false;
+      clearInterval(interval);
+      if (channel) {
+        supabase.removeChannel(channel);
       }
+    };
+  }, [activeDevice, towState, activeTowJob?.id]);
 
-      // 2. Fetch our currently active ongoing dispatch if assigned to us
-      if (sessionUser) {
-        const { data: activeList } = await supabase
+// Real-time listener para el ciudadano (Telemedicina Real)
+// Real-time listener para el ciudadano (SOS Abogado Penalista)
+  useEffect(() => {
+    if (activeDevice !== 'citizen' || !activeEmergency) return;
+
+    let active = true;
+
+    const syncCitizenSOS = async () => {
+      if (!active) return;
+      try {
+        const { data: updated } = await supabase
           .from('emergencias_activas')
           .select('*')
-          .eq('estado', 'activa')
-          .eq('abogado_id', sessionUser.id);
+          .eq('id', activeEmergency.id)
+          .maybeSingle();
 
-        if (activeList && activeList.length > 0) {
-          const active = activeList[0];
-          const { data: userData } = await supabase
-            .from('usuarios')
-            .select('nombre_completo, contacto_emergencia_1_telefono')
-            .eq('id', active.ciudadano_id)
-            .maybeSingle();
+        if (!updated) return;
 
-          const cName = userData?.nombre_completo || 'Ciudadano';
-          const cPhone = userData?.contacto_emergencia_1_telefono || '';
-          const distance = 2100;
-
-          setAmbulanceState('dispatched');
-          setIsAmbulanceDailyCoActive(true);
-          setActiveAmbulanceJob({
-            id: active.id,
-            citizenName: cName,
-            citizenPhone: cPhone,
-            latitude: Number(active.ubicacion_lat),
-            longitude: Number(active.ubicacion_lng),
-            price: Number(active.tarifa_aplicada),
-            distance: distance
-          });
-        } else {
-          if (ambulanceState !== 'idle') {
-            setAmbulanceState('idle');
-            setActiveAmbulanceJob(null);
+        if (updated.estado === 'activa' && sosState !== 'active') {
+          // Buscar el nombre real del abogado asignado
+          let abgName = 'Abogado Asignado';
+          if (updated.abogado_id) {
+            const { data: abgData } = await supabase.from('abogados').select('nombre_completo').eq('id', updated.abogado_id).maybeSingle();
+            if (abgData) abgName = abgData.nombre_completo || abgName;
           }
+
+          if (!active) return;
+
+          setSosState('active');
+          setIsLiveVideoActive(true);
+          setActiveEmergency(prev => prev ? { 
+            ...prev, 
+            status: 'active',
+            dailyRoomUrl: updated.sala_webrtc_url || updated.daily_room_url,
+            lawyerId: abgName,
+            tarifa: updated.tarifa_aplicada
+          } : null);
+          triggerPush('⚖️ Abogado Conectado', 'El abogado penalista ha ingresado a la sala. Conectando videodefensa segura...');
+        } else if ((updated.estado === 'finalizada' || updated.estado === 'completado') && sosState !== 'idle') {
+          setSosState('idle');
+          setActiveEmergency(null);
+          setIsLiveVideoActive(false);
+          const rate = Number(updated.tarifa_aplicada) || 15.00;
+          setCitizenBalance(b => Math.max(0, b - rate));
+          showMaterialAlert('⚖️ Defensa Concluida', 'El procedimiento legal ha finalizado y el video fue respaldado en la nube.');
         }
-      }
+      } catch (err) {}
     };
 
-    fetchCallingAmbulances();
-
+    // WebSocket (Tiempo Real)
     const channel = supabase
-      .channel('ambulance-panel-sync')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'emergencias_activas' }, () => {
-        fetchCallingAmbulances();
+      .channel(`citizen-sos-${activeEmergency.id}`)
+      .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'emergencias_activas', filter: `id=eq.${activeEmergency.id}` }, () => {
+        syncCitizenSOS();
       })
       .subscribe();
 
+    // POLLING: El salvavidas que fuerza la conexión cada 2 segundos
+    const interval = setInterval(syncCitizenSOS, 2000);
+
     return () => {
+      active = false;
+      clearInterval(interval);
       supabase.removeChannel(channel);
     };
-  }, [activeDevice, ambulanceState, sessionUser?.id]);
+  }, [activeDevice, activeEmergency?.id, sosState]);
+  useEffect(() => {
+    if (activeDevice !== 'citizen' || !activeMedicEmergency) return;
 
-  // Real-time synchronization for Doctor/Medic Guard Panel
+    let active = true;
+
+    const syncCitizenMedic = async () => {
+      if (!active) return;
+      try {
+        const { data: updated } = await supabase
+          .from('asistencias_medicas')
+          .select('*')
+          .eq('id', activeMedicEmergency.id)
+          .maybeSingle();
+
+        if (!updated) return;
+
+        if (updated.estado === 'activa' && medicState !== 'active') {
+          // Extraer datos reales del médico desde la BD
+          let dName = 'Especialista Asignado';
+          let dLic = 'MSAS-Verificado';
+          if (updated.medico_id) {
+            const { data: docData } = await supabase.from('medicos').select('nombre_completo, licencia_medica').eq('id', updated.medico_id).maybeSingle();
+            if (docData) {
+              dName = docData.nombre_completo || dName;
+              dLic = docData.licencia_medica || dLic;
+            }
+          }
+
+          if (!active) return;
+
+          setMedicState('active');
+          setIsMedicWindowOpen(true);
+          setIsMedicDailyCoActive(true);
+          setActiveMedicEmergency(prev => prev ? { 
+            ...prev, 
+            dailyRoomUrl: updated.sala_webrtc_url,
+            medicName: dName,
+            medicLicense: dLic
+          } : null);
+          triggerPush('🏥 Especialista Conectado', 'El médico ha ingresado a la sala. Conectando video seguro...');
+        } else if ((updated.estado === 'finalizada' || updated.estado === 'completado') && medicState !== 'idle') {
+          setMedicState('idle');
+          setActiveMedicEmergency(null);
+          setIsMedicWindowOpen(false);
+          const rate = Number(updated.costo_total) || 20.00;
+          setCitizenBalance(b => Math.max(0, b - rate));
+          showMaterialAlert('🩺 Consulta Concluida', 'Sesión telemédica terminada. Diagnóstico y receta encriptada enviados a tu expediente.');
+        }
+      } catch (err) {}
+    };
+
+    const channel = supabase
+      .channel(`citizen-medic-${activeMedicEmergency.id}`)
+      .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'asistencias_medicas', filter: `id=eq.${activeMedicEmergency.id}` }, () => {
+        syncCitizenMedic();
+      })
+      .subscribe();
+
+    const interval = setInterval(syncCitizenMedic, 2000);
+
+    return () => {
+      active = false;
+      clearInterval(interval);
+      supabase.removeChannel(channel);
+    };
+  }, [activeDevice, activeMedicEmergency?.id, medicState]);
+
+  // Real-time listener para el Médico de Guardia
   useEffect(() => {
     if (activeDevice !== 'medic') return;
 
+    let active = true;
+
     const fetchCallingMedics = async () => {
-      const { data: callingData } = await supabase
-        .from('emergencias_activas')
-        .select('*')
-        .eq('estado', 'buscando');
-
-      const filteredMedic = callingData?.filter(e => e.sala_webrtc_url && e.sala_webrtc_url.includes('Medic')) || [];
-      if (filteredMedic.length > 0) {
-        const active = filteredMedic[0];
-        const { data: userData } = await supabase
-          .from('usuarios')
-          .select('nombre_completo, contacto_emergencia_1_telefono')
-          .eq('id', active.ciudadano_id)
-          .maybeSingle();
-
-        const cName = userData?.nombre_completo || 'Ciudadano de Guardia';
-        const cPhone = userData?.contacto_emergencia_1_telefono || '';
-
-        if (medicState === 'idle') {
-          setMedicState('calling');
-          setActiveMedicEmergency({
-            id: active.id,
-            citizenName: cName,
-            citizenPhone: cPhone,
-            latitude: Number(active.ubicacion_lat),
-            longitude: Number(active.ubicacion_lng),
-            price: Number(active.tarifa_aplicada)
-          });
-        }
-        return;
-      }
-
-      // 2. Fetch our currently active medical consultation if assigned to us
-      if (sessionUser) {
-        const { data: activeList } = await supabase
-          .from('emergencias_activas')
+      if (!active) return;
+      try {
+        const { data: callingData } = await supabase
+          .from('asistencias_medicas')
           .select('*')
-          .eq('estado', 'activa')
-          .eq('abogado_id', sessionUser.id);
+          .eq('estado', 'buscando');
 
-        if (activeList && activeList.length > 0) {
-          const active = activeList[0];
+        if (callingData && callingData.length > 0) {
+          const activeRecord = callingData[0];
           const { data: userData } = await supabase
             .from('usuarios')
             .select('nombre_completo, contacto_emergencia_1_telefono')
-            .eq('id', active.ciudadano_id)
+            .eq('id', activeRecord.ciudadano_id)
             .maybeSingle();
 
-          const cName = userData?.nombre_completo || 'Ciudadano de Guardia';
-          const cPhone = userData?.contacto_emergencia_1_telefono || '';
+          if (medicState === 'idle') {
+            setMedicState('calling');
+            setActiveMedicEmergency({
+              id: activeRecord.id,
+              citizenName: userData?.nombre_completo || 'Paciente',
+              citizenPhone: userData?.contacto_emergencia_1_telefono || '',
+              latitude: Number(activeRecord.ubicacion_lat),
+              longitude: Number(activeRecord.ubicacion_lng),
+              price: Number(activeRecord.costo_total),
+              dailyRoomUrl: activeRecord.sala_webrtc_url
+            });
+          }
+          return;
+        }
 
-          setMedicState('active');
-          setIsMedicDailyCoActive(true);
-          setActiveMedicEmergency({
-            id: active.id,
-            citizenName: cName,
-            citizenPhone: cPhone,
-            latitude: Number(active.ubicacion_lat),
-            longitude: Number(active.ubicacion_lng),
-            price: Number(active.tarifa_aplicada)
-          });
-        } else {
-          if (medicState !== 'idle') {
+        if (sessionUser) {
+          const { data: activeList } = await supabase
+            .from('asistencias_medicas')
+            .select('*')
+            .eq('estado', 'activa')
+            .eq('medico_id', sessionUser.id);
+
+          if (activeList && activeList.length > 0) {
+            const activeRecord = activeList[0];
+            const { data: userData } = await supabase
+              .from('usuarios')
+              .select('nombre_completo, contacto_emergencia_1_telefono')
+              .eq('id', activeRecord.ciudadano_id)
+              .maybeSingle();
+
+            if (medicState !== 'active') {
+              setMedicState('active');
+              setIsMedicDailyCoActive(true);
+              setActiveMedicEmergency({
+                id: activeRecord.id,
+                citizenName: userData?.nombre_completo || 'Paciente',
+                citizenPhone: userData?.contacto_emergencia_1_telefono || '',
+                latitude: Number(activeRecord.ubicacion_lat),
+                longitude: Number(activeRecord.ubicacion_lng),
+                price: Number(activeRecord.costo_total),
+                dailyRoomUrl: activeRecord.sala_webrtc_url
+              });
+            }
+          } else if (medicState !== 'idle') {
             setMedicState('idle');
             setActiveMedicEmergency(null);
           }
         }
-      }
+      } catch (err) {}
     };
 
     fetchCallingMedics();
 
     const channel = supabase
       .channel('medic-panel-sync')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'emergencias_activas' }, () => {
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'asistencias_medicas' }, () => {
         fetchCallingMedics();
       })
       .subscribe();
 
+    // POLLING: Forza la lectura para el médico cada 2 segundos
+    const interval = setInterval(fetchCallingMedics, 2000);
+
     return () => {
+      active = false;
+      clearInterval(interval);
       supabase.removeChannel(channel);
     };
   }, [activeDevice, medicState, sessionUser?.id]);
+  // Cargar Finanzas del Médico
+  useEffect(() => {
+    if (!sessionUser || activeDevice !== 'medic') return;
+    const fetchFinanzasMedico = async () => {
+      try {
+        const { data: sm } = await supabase.from('saldos_medicos').select('balance').eq('user_id', sessionUser.id).maybeSingle();
+        if (sm) setTotalMedicEarnings(Number(sm.balance) || 0.00);
+
+        const { data: usrRow } = await supabase.from('usuarios').select('id').eq('auth_id', sessionUser.id).maybeSingle();
+        const mUsrId = usrRow?.id || sessionUser.id;
+
+        const { data: hist } = await supabase.from('historial_comisiones').select('*').eq('profesional_id', mUsrId).eq('tipo_servicio', 'medico').order('created_at', { ascending: false });
+        if (hist) {
+          setMedicHistory(hist);
+          setCompletedMedicSessions(hist.length);
+        }
+      } catch (err) {}
+    };
+    fetchFinanzasMedico();
+  }, [sessionUser, activeDevice, medicState]);
+
+  // NUEVO: Cargar Finanzas de la Ambulancia y mostrar historial
+  useEffect(() => {
+    if (!sessionUser || activeDevice !== 'ambulance') return;
+    const fetchFinanzasAmbulancia = async () => {
+      try {
+        const { data: sa } = await supabase.from('saldos_ambulancias').select('balance').eq('user_id', sessionUser.id).maybeSingle();
+        if (sa) {
+          setTotalAmbulanceEarnings(Number(sa.balance) || 0.00);
+          setAmbulanceBalanceClean(Number(sa.balance) || 0.00);
+        }
+        
+        const { data: usrRow } = await supabase.from('usuarios').select('id').eq('auth_id', sessionUser.id).maybeSingle();
+        const aUsrId = usrRow?.id || sessionUser.id;
+        const { count } = await supabase.from('historial_comisiones').select('*', { count: 'exact', head: true }).eq('profesional_id', aUsrId).eq('tipo_servicio', 'ambulancia');
+        if (count !== null) setCompletedAmbulanceSessions(count);
+
+      } catch (err) {}
+    };
+    fetchFinanzasAmbulancia();
+  }, [sessionUser, activeDevice, ambulanceState]);
+
+// Real-time listener for the citizen to sync the ambulance dispatch status and chat messages
+  useEffect(() => {
+    if (activeDevice !== 'citizen' || !activeAmbulanceJob) return;
+
+    let active = true;
+
+    const syncCitizenAmbulance = async () => {
+      if (!active) return;
+      try {
+        const { data: updated } = await supabase
+          .from('asistencias_ambulancias')
+          .select('*')
+          .eq('id', activeAmbulanceJob.id)
+          .maybeSingle();
+
+        if (!updated) return;
+
+        if (updated.estado === 'activa' && ambulanceState !== 'dispatched') {
+          // LECTURA DIRECTA A TU TABLA PARAMEDICOS
+          let dName = 'Unidad Paramédica';
+          if (updated.paramedico_id) {
+            const { data: paramData } = await supabase
+              .from('paramedicos')
+              .select('nombre_completo')
+              .or(`auth_id.eq.${updated.paramedico_id},id.eq.${updated.paramedico_id}`)
+              .maybeSingle();
+            if (paramData) dName = paramData.nombre_completo || dName;
+          }
+
+          if (!active) return;
+
+          // ACTUALIZA ESTADOS, ROMPE EL BUCLE Y ABRE EL CHAT/VIDEO (OVERLAY NATIVO)
+          setAmbulanceState('dispatched');
+          setIsAmbulanceWindowOpen(true);
+          setIsAmbulanceDailyCoActive(true);
+          
+          setActiveAmbulanceJob(prev => prev ? { 
+            ...prev, 
+            status: 'active', // <-- Fundamental para quitar la pantalla de carga roja
+            dailyRoomUrl: updated.sala_webrtc_url,
+            driverName: dName
+          } : null);
+          
+          triggerPush('🚑 Auxilio en Camino', `El paramédico ${dName} ha iniciado conexión.`);
+        } else if ((updated.estado === 'finalizada' || updated.estado === 'completado') && ambulanceState !== 'idle') {
+          setAmbulanceState('idle');
+          setActiveAmbulanceJob(null);
+          setIsAmbulanceWindowOpen(false);
+          setIsAmbulanceDailyCoActive(false);
+          const rate = Number(updated.costo_total) || 50.00;
+          setCitizenBalance(b => Math.max(0, b - rate));
+          showMaterialAlert('🚑 Traslado Concluido', 'La ambulancia ha finalizado el caso.');
+        }
+      } catch (err) {
+        console.error("Error en sync de ambulancia:", err);
+      }
+    };
+
+    const channel = supabase
+      .channel(`citizen-ambulance-${activeAmbulanceJob.id}`)
+      .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'asistencias_ambulancias', filter: `id=eq.${activeAmbulanceJob.id}` }, () => {
+        syncCitizenAmbulance();
+      })
+      .subscribe();
+
+    const interval = setInterval(syncCitizenAmbulance, 2000);
+
+    return () => {
+      active = false;
+      clearInterval(interval);
+      supabase.removeChannel(channel);
+    };
+  }, [activeDevice, activeAmbulanceJob?.id, ambulanceState]);
+ // Real-time listener and synchronizer for Tow Truck Driver Panel using exclusive public.asistencias_viales
+  useEffect(() => {
+    if (activeDevice !== 'driver' || !sessionUser?.id) return;
+
+    let active = true;
+    let channel: any = null;
+
+    const handleIncomingPendiente = async (assist: any) => {
+      try {
+        if (!active) return;
+        
+        // FILTRO UBER: Aceptar el viaje si fue asignado a mí, o si es un BROADCAST para todos (null)
+        const { data: currentDriver } = await supabase.from('grueros').select('id').eq('auth_id', sessionUser.id).maybeSingle();
+        if (assist.gruero_id !== currentDriver?.id && assist.gruero_id !== null) return;
+
+        const { data: userData } = await supabase.from('usuarios').select('nombre_completo, contacto_emergencia_1_telefono').eq('id', assist.ciudadano_id).maybeSingle();
+        if (!active) return;
+
+        setTowState('proposed');
+        setActiveTowJob({
+          id: assist.id,
+          citizenName: userData?.nombre_completo || 'Asegurado',
+          citizenPhone: userData?.contacto_emergencia_1_telefono || 'No phone',
+          status: 'pending',
+          latitude: Number(assist.ubicacion_origen_lat),
+          longitude: Number(assist.ubicacion_origen_lng),
+          price: Number(assist.costo_total),
+          distance: assist.distancia_metros || 0 
+        });
+        setActiveVialAssist(assist);
+      } catch (err) {
+        console.error("Error setting proposed job:", err);
+      }
+    };
+
+    const syncDriverTowState = async () => {
+      try {
+        const { data: qGruero } = await supabase.from('grueros').select('id').eq('auth_id', sessionUser.id).maybeSingle();
+        if (!active) return;
+        const grueroId = qGruero?.id;
+        if (!grueroId) return;
+
+        // =========================================================
+        // LECTURA OBLIGATORIA DEL GPS FÍSICO REAL DEL GRUERO
+        // =========================================================
+        try {
+          let realLat = towDriverCoords.lat;
+          let realLng = towDriverCoords.lng;
+          
+          // GPS ESTRICTO: Si es 0, esperar al satélite físico.
+          if (realLat === 0 || isNaN(realLat)) {
+             const pos: any = await new Promise((resolve, reject) => {
+               navigator.geolocation.getCurrentPosition(resolve, reject, { enableHighAccuracy: true, timeout: 15000 });
+             });
+             realLat = pos.coords.latitude;
+             realLng = pos.coords.longitude;
+             setTowDriverCoords({ lat: realLat, lng: realLng });
+          }
+
+          const { data: unitRow } = await supabase.from('unidades_grua').select('id').eq('gruero_id', grueroId).maybeSingle();
+          if (unitRow) {
+            await supabase.from('unidades_grua').update({ lat_actual: realLat, lng_actual: realLng, estado: 'disponible' }).eq('id', unitRow.id);
+            setCraneUnitState({ lat_actual: realLat, lng_actual: realLng });
+          } else {
+            await supabase.from('unidades_grua').insert({ gruero_id: grueroId, lat_actual: realLat, lng_actual: realLng, estado: 'disponible' });
+            setCraneUnitState({ lat_actual: realLat, lng_actual: realLng });
+          }
+        } catch (initErr) {
+          console.warn("No se pudo forzar el GPS del gruero al inicio:", initErr);
+        }
+        // =========================================================
+
+        const { data: activeList } = await supabase.from('asistencias_viales').select('*').in('estado', ['activa', 'en_progreso']).eq('gruero_id', grueroId);
+
+        if (!active) return;
+
+        if (activeList && activeList.length > 0) {
+          const assist = activeList[0];
+          const { data: userData } = await supabase.from('usuarios').select('nombre_completo, contacto_emergencia_1_telefono').eq('id', assist.ciudadano_id).maybeSingle();
+
+          if (!active) return;
+          setTowState('dispatched');
+          setActiveTowJob({
+            id: assist.id,
+            citizenName: userData?.nombre_completo || 'Asegurado',
+            citizenPhone: userData?.contacto_emergencia_1_telefono || 'No phone',
+            status: 'en_route',
+            latitude: Number(assist.ubicacion_origen_lat),
+            longitude: Number(assist.ubicacion_origen_lng),
+            price: Number(assist.costo_total),
+            distance: assist.distancia_metros || 0
+          });
+          setActiveVialAssist(assist);
+        } else {
+          // FILTRO BROADCAST: Buscar viajes asignados a mí, o los que estén libres para todos (null)
+          const { data: pendingList } = await supabase.from('asistencias_viales').select('*').eq('estado', 'pendiente').or(`gruero_id.eq.${grueroId},gruero_id.is.null`);
+
+          if (active && pendingList && pendingList.length > 0) {
+            const assist = pendingList[0];
+            const { data: userData } = await supabase.from('usuarios').select('nombre_completo, contacto_emergencia_1_telefono').eq('id', assist.ciudadano_id).maybeSingle();
+
+            if (active) {
+              setTowState('proposed');
+              setActiveTowJob({
+                id: assist.id,
+                citizenName: userData?.nombre_completo || 'Asegurado',
+                citizenPhone: userData?.contacto_emergencia_1_telefono || 'No phone',
+                status: 'pending',
+                latitude: Number(assist.ubicacion_origen_lat),
+                longitude: Number(assist.ubicacion_origen_lng),
+                price: Number(assist.costo_total),
+                distance: assist.distancia_metros || 0
+              });
+              setActiveVialAssist(assist);
+            }
+          } else {
+            if (towStateRef.current === 'dispatched' && activeTowJobRef.current) {
+              const { data: currentJob } = await supabase.from('asistencias_viales').select('estado').eq('id', activeTowJobRef.current.id).maybeSingle();
+              if (currentJob && (currentJob.estado === 'completado' || currentJob.estado === 'cancelado')) {
+                setTowState('idle'); setActiveTowJob(null); setActiveVialAssist(null);
+              }
+              return;
+            }
+            if (towStateRef.current !== 'proposed') {
+              setTowState('idle'); setActiveTowJob(null); setActiveVialAssist(null);
+            }
+          }
+        }
+      } catch (err) {
+        console.error("Error syncing driver tow status:", err);
+      }
+    };
+
+    syncDriverTowState();
+
+    channel = supabase.channel('driver-vial-assist-channel')
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'asistencias_viales' }, (payload) => {
+        if (active && payload.new && payload.new.estado === 'pendiente') handleIncomingPendiente(payload.new);
+      })
+      .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'asistencias_viales' }, (payload) => {
+        if (active && payload.new) {
+          if (payload.new.estado === 'activa' && payload.new.gruero_id) {
+            syncDriverTowState();
+          } else if (payload.new.estado === 'completado' || payload.new.estado === 'cancelado') {
+            if (activeVialAssist && payload.new.id === activeVialAssist.id) {
+              setTowState('idle'); setActiveTowJob(null); setActiveVialAssist(null);
+            }
+          }
+        }
+      }).subscribe();
+
+    const interval = setInterval(() => { if (active) syncDriverTowState(); }, 2000);
+
+    return () => {
+      active = false;
+      clearInterval(interval);
+      if (channel) supabase.removeChannel(channel);
+    };
+  }, [activeDevice, sessionUser?.id]);
+// REAL GEOLOCATION WATCH: Tracks and updates Citizen position in real-time
+  useEffect(() => {
+    if (activeDevice !== 'citizen') return;
+
+    if (!navigator.geolocation) {
+      showMaterialAlert('Error', 'Tu dispositivo no soporta GPS.');
+      return;
+    }
+
+    // AVISO OBLIGATORIO DE GOOGLE PLAY (UBICACIÓN CIUDADANO)
+    if (!localStorage.getItem('gps_aviso_ciudadano')) {
+      const gpsConsent = window.confirm("SecureFlow recopila datos de ubicación para habilitar el rastreo en tiempo real de tu emergencia y enviar ayuda a tu posición exacta, incluso cuando la app está en segundo plano. ¿Aceptas?");
+      if (!gpsConsent) return;
+      localStorage.setItem('gps_aviso_ciudadano', 'true');
+    }
+
+    // 1. FORZAR PETICIÓN DE PERMISOS FRONTALES AL INICIAR SESIÓN (CIUDADANO)
+    navigator.geolocation.getCurrentPosition(
+      (pos) => {
+        setCitizenCoords({ lat: pos.coords.latitude, lng: pos.coords.longitude });
+      },
+      (err) => {
+        showMaterialAlert('📡 Permiso GPS Requerido', 'Por favor, ve a los ajustes de tu celular o navegador y permite el acceso a la ubicación para solicitar asistencia.');
+      },
+      { enableHighAccuracy: true, timeout: 15000, maximumAge: 0 }
+    );
+
+    const handleCoordsUpdate = async (lat: number, lng: number) => {
+      setCitizenCoords({ lat, lng });
+
+      // If tow job is active, update the databases' origen coordinates
+      const currentJobId = activeTowJob?.id || activeVialAssist?.id;
+      if (currentJobId) {
+        try {
+          await supabase
+            .from('asistencias_viales')
+            .update({
+              ubicacion_origen_lat: lat,
+              ubicacion_origen_lng: lng
+            })
+            .eq('id', currentJobId);
+        } catch (err) {
+          console.error("Error updating active asistencia coords:", err);
+        }
+      }
+    };
+
+    const watchId = navigator.geolocation.watchPosition(
+      (position) => {
+        handleCoordsUpdate(position.coords.latitude, position.coords.longitude);
+      },
+      (error) => {
+        console.warn("Error watching citizen position:", error);
+      },
+      { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 }
+    );
+
+    return () => {
+      navigator.geolocation.clearWatch(watchId);
+    };
+  }, [activeDevice, activeTowJob?.id, activeVialAssist?.id]);
+
+  // REAL GEOLOCATION WATCH: Tracks and updates Tow Driver position in real-time
+  useEffect(() => {
+    if (activeDevice !== 'driver' || !sessionUser?.id) return;
+
+    if (!navigator.geolocation) {
+      showMaterialAlert('Error', 'Tu dispositivo no soporta GPS.');
+      return;
+    }
+
+    // AVISO OBLIGATORIO DE GOOGLE PLAY (UBICACIÓN GRUERO)
+    if (!localStorage.getItem('gps_aviso_gruero')) {
+      const gpsConsent = window.confirm("SecureFlow recopila datos de ubicación para rastrear tu grúa en tiempo real y asignarte servicios cercanos, incluso cuando la app está en segundo plano o minimizada. ¿Aceptas?");
+      if (!gpsConsent) return;
+      localStorage.setItem('gps_aviso_gruero', 'true');
+    }
+
+    const handleDriverCoordsUpdate = async (lat: number, lng: number) => {
+      setTowDriverCoords({ lat, lng });
+      setCraneUnitState({ lat_actual: lat, lng_actual: lng });
+
+      try {
+        // Resolve the true grueros.id from public.grueros table where auth_id equals sessionUser.id
+        const { data: qGruero } = await supabase
+          .from('grueros')
+          .select('id')
+          .eq('auth_id', sessionUser.id)
+          .maybeSingle();
+
+        const actualGrueroId = qGruero?.id;
+        if (!actualGrueroId) {
+          console.warn("No registered gruero profile found for current driver auth user.");
+          return;
+        }
+
+        // Query if crane unit exists
+        const { data: craneUnit } = await supabase
+          .from('unidades_grua')
+          .select('*')
+          .eq('gruero_id', actualGrueroId)
+          .maybeSingle();
+
+        if (craneUnit) {
+          await supabase
+            .from('unidades_grua')
+            .update({
+              lat_actual: lat,
+              lng_actual: lng,
+              estado: 'disponible'
+            })
+            .eq('gruero_id', actualGrueroId);
+        } else {
+          await supabase
+            .from('unidades_grua')
+            .insert({
+              gruero_id: actualGrueroId,
+              lat_actual: lat,
+              lng_actual: lng,
+              estado: 'disponible'
+            });
+        }
+      } catch (err) {
+        console.error("Error syncing driver geolocation to DB:", err);
+      }
+    };
+
+    // 1. FORZAR PETICIÓN DE PERMISOS FRONTALES AL INICIAR SESIÓN (GRUERO)
+    navigator.geolocation.getCurrentPosition(
+      (pos) => {
+        handleDriverCoordsUpdate(pos.coords.latitude, pos.coords.longitude);
+      },
+      (err) => {
+        showMaterialAlert('📡 Permiso GPS Requerido', 'Como operador, el sistema exige que des permiso de GPS en tu dispositivo de forma obligatoria. Ve a los ajustes, actívalo y recarga.');
+      },
+      { enableHighAccuracy: true, timeout: 15000, maximumAge: 0 }
+    );
+
+    const watchId = navigator.geolocation.watchPosition(
+      (position) => {
+        handleDriverCoordsUpdate(position.coords.latitude, position.coords.longitude);
+      },
+      (error) => {
+        console.warn("Error watching driver position:", error);
+      },
+      { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 }
+    );
+
+    return () => {
+      navigator.geolocation.clearWatch(watchId);
+    };
+  }, [activeDevice, sessionUser?.id]);
+
+
+
+  // Real-time synchronization for Ambulance Paramedic Panel
+  useEffect(() => {
+    if (activeDevice !== 'ambulance') return;
+
+    let active = true;
+
+    const fetchCallingAmbulances = async () => {
+      if (!active) return;
+      try {
+        const { data: callingData } = await supabase
+          .from('asistencias_ambulancias')
+          .select('*')
+          .eq('estado', 'buscando');
+
+        if (callingData && callingData.length > 0) {
+          const activeRecord = callingData[0];
+          const { data: userData } = await supabase
+            .from('usuarios')
+            .select('nombre_completo, contacto_emergencia_1_telefono')
+            .eq('id', activeRecord.ciudadano_id)
+            .maybeSingle();
+
+          if (ambulanceState === 'idle') {
+            setAmbulanceState('proposed');
+            setActiveAmbulanceJob({
+              id: activeRecord.id,
+              citizenName: userData?.nombre_completo || 'Paciente',
+              citizenPhone: userData?.contacto_emergencia_1_telefono || '',
+              latitude: Number(activeRecord.ubicacion_lat),
+              longitude: Number(activeRecord.ubicacion_lng),
+              price: Number(activeRecord.costo_total),
+              distance: 2100,
+              dailyRoomUrl: activeRecord.sala_webrtc_url
+            });
+          }
+          return;
+        }
+
+        if (sessionUser) {
+          const { data: activeList } = await supabase
+            .from('asistencias_ambulancias')
+            .select('*')
+            .eq('estado', 'activa')
+            .eq('paramedico_id', sessionUser.id);
+
+          if (activeList && activeList.length > 0) {
+            const activeRecord = activeList[0];
+            const { data: userData } = await supabase
+              .from('usuarios')
+              .select('nombre_completo, contacto_emergencia_1_telefono')
+              .eq('id', activeRecord.ciudadano_id)
+              .maybeSingle();
+
+            if (ambulanceState !== 'dispatched') {
+              setAmbulanceState('dispatched');
+              setIsAmbulanceDailyCoActive(true);
+              setActiveAmbulanceJob({
+                id: activeRecord.id,
+                citizenName: userData?.nombre_completo || 'Paciente',
+                citizenPhone: userData?.contacto_emergencia_1_telefono || '',
+                latitude: Number(activeRecord.ubicacion_lat),
+                longitude: Number(activeRecord.ubicacion_lng),
+                price: Number(activeRecord.costo_total),
+                distance: 2100,
+                dailyRoomUrl: activeRecord.sala_webrtc_url
+              });
+            }
+          } else if (ambulanceState !== 'idle') {
+            setAmbulanceState('idle');
+            setActiveAmbulanceJob(null);
+          }
+        }
+      } catch (err) {}
+    };
+
+    fetchCallingAmbulances();
+
+    const channel = supabase
+      .channel('ambulance-panel-sync')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'asistencias_ambulancias' }, () => {
+        fetchCallingAmbulances();
+      })
+      .subscribe();
+
+    const interval = setInterval(fetchCallingAmbulances, 2000);
+
+    return () => {
+      active = false;
+      clearInterval(interval);
+      supabase.removeChannel(channel);
+    };
+  }, [activeDevice, ambulanceState, sessionUser?.id]);
+ 
 
   // Synchronized Real-time broadcast chat messaging hook for all active roles
   useEffect(() => {
@@ -1656,12 +2403,11 @@ export default function App() {
 
     if (!activeId || !channelName || !setMsgs) return;
 
-    const channel = supabase
+const channel = supabase
       .channel(channelName)
       .on('broadcast', { event: 'shout' }, ({ payload }) => {
         if (payload && payload.msg && setMsgs) {
           setMsgs(prev => {
-            // Avoid duplicate messages if received from our own send
             if (prev.some(m => m.text === payload.msg.text && m.sender === payload.msg.sender && m.time === payload.msg.time)) {
               return prev;
             }
@@ -1669,15 +2415,36 @@ export default function App() {
           });
         }
       })
+      .on('broadcast', { event: 'gps' }, ({ payload }) => {
+        // RECEPTOR GPS: El ciudadano lee la ubicación real del paramédico
+        if (activeDevice === 'citizen' && activeAmbulanceJob && payload && payload.lat && payload.lng) {
+          const realLat = Number(payload.lat);
+          const realLng = Number(payload.lng);
+          
+          setAmbulanceCoords({ lat: realLat, lng: realLng });
+          
+          const distKm = calculateDistanceInKm(realLat, realLng, citizenCoords.lat, citizenCoords.lng);
+          setActiveAmbulanceJob(prev => prev ? { 
+            ...prev, 
+            distance: Math.round(distKm * 1000),
+            latitude: realLat,
+            longitude: realLng
+          } : null);
+        }
+      })
       .subscribe();
 
     return () => {
       supabase.removeChannel(channel);
     };
-  }, [activeDevice, activeEmergency?.id, activeTowJob?.id, activeAmbulanceJob?.id, activeMedicEmergency?.id]);
+  }, [activeDevice, activeEmergency?.id, activeTowJob?.id, activeAmbulanceJob?.id, activeMedicEmergency?.id, citizenCoords.lat, citizenCoords.lng]);
 
   // Real Selfie Camera Handlers for authentic Biometrics
   const startSelfieCamera = async () => {
+    // AVISO OBLIGATORIO DE GOOGLE PLAY (CÁMARA)
+    const camConsent = window.confirm("SecureFlow recopila y requiere acceso a tu cámara frontal para capturar la selfie de seguridad biométrica. ¿Deseas permitir el acceso?");
+    if (!camConsent) return;
+
     setSelfieCameraError(null);
     setIsCapturingSelfie(true);
     try {
@@ -1747,6 +2514,10 @@ export default function App() {
 
   // Simulate dictation
   const triggerDictation = () => {
+    // AVISO OBLIGATORIO DE GOOGLE PLAY (MICRÓFONO)
+    const micConsent = window.confirm("SecureFlow requiere acceso a tu micrófono para procesar comandos de voz. ¿Deseas permitir el acceso?");
+    if (!micConsent) return;
+
     if (isDictating) return;
     setIsDictating(true);
     triggerPush('🎙️ SecureFlow Dictado', 'Grabando audio de voz para análisis...');
@@ -1763,94 +2534,96 @@ export default function App() {
     }, 2000);
   };
 
-  // Simulate Tow Truck movement toward citizen
+// Track Tow Truck proximity with the citizen in real-time
   useEffect(() => {
-    let interval: NodeJS.Timeout;
-    if (towState === 'dispatched' && activeTowJob) {
-      interval = setInterval(() => {
-        setTowDriverCoords(prev => {
-          const latDiff = citizenCoords.lat - prev.lat;
-          const lngDiff = citizenCoords.lng - prev.lng;
+    // 1. CANDADO ANTI-CRASH: Solo se ejecuta si ambas latitudes existen
+    if (
+      towState === 'dispatched' && 
+      activeTowJob?.latitude && 
+      activeTowJob?.longitude &&
+      towDriverCoords?.lat &&
+      towDriverCoords?.lng
+    ) {
+      
+      const distanceKm = calculateDistanceInKm(
+        towDriverCoords.lat,
+        towDriverCoords.lng,
+        activeTowJob.latitude,
+        activeTowJob.longitude
+      );
+      
+      const distanceMeters = Math.round(distanceKm * 1000);
+      if (isNaN(distanceMeters)) return;
+
+      // 2. ACTUALIZACIÓN VISUAL (Avanza solo si se mueve > 15 metros)
+      setActiveTowJob(prev => {
+        if (!prev) return prev;
+        const currentDist = prev.distance || 0;
+        if (Math.abs(currentDist - distanceMeters) > 15) {
+          return { ...prev, distance: distanceMeters };
+        }
+        return prev;
+      });
+
+      // 3. AVISO DE LLEGADA AL SITIO (Menos de 40 metros)
+      if (distanceMeters < 40) {
+        // ERROR ELIMINADO: Ya NO usamos setTowState('completed') aquí. 
+        // El viaje solo se completa cuando el gruero presiona el botón verde.
+        
+        setTowMessages(prev => {
+          // Verificamos si ya mandamos el mensaje al chat para no hacer spam ni bucles
+          if (prev.some(msg => msg.text.includes('🏁 He llegado'))) return prev;
           
-          // Move 20% closer
-          const stepLat = prev.lat + latDiff * 0.2;
-          const stepLng = prev.lng + lngDiff * 0.2;
-
-          // Calculate current distance in meters roughly
-          const currentDist = Math.round(
-            Math.sqrt(Math.pow(latDiff * 111000, 2) + Math.pow(lngDiff * 111000, 2))
-          );
-
-          if (currentDist < 30) {
-            setTowState('completed');
+          // Disparamos la notificación Push de forma segura y una sola vez
+          setTimeout(() => {
             triggerPush('🚜 Grúa en el Sitio', 'La unidad de asistencia vial ha llegado a tu ubicación.');
-            setTowMessages(m => [...m, { 
-              sender: 'driver', 
-              text: '🏁 He llegado a tu ubicación exacta con la grúa. Estoy estacionado detrás de ti. Procedo a enganchar el vehículo.', 
-              time: '19:56' 
-            }]);
-            clearInterval(interval);
-            return prev;
-          }
+          }, 100);
 
-          if (activeTowJob) {
-            setActiveTowJob({
-              ...activeTowJob,
-              distance: currentDist
-            });
-          }
-
-          return { lat: stepLat, lng: stepLng };
+          return [...prev, { 
+            sender: 'driver', 
+            text: '🏁 He llegado a tu ubicación exacta con la grúa. Estoy estacionado detrás de ti. Procedo a enganchar el vehículo.', 
+            time: new Date().toLocaleTimeString('es-VE', { hour: '2-digit', minute: '2-digit', hour12: false })
+          }];
         });
-      }, 3500);
+      }
     }
-    return () => clearInterval(interval);
-  }, [towState, activeTowJob]);
-
-  // Simulate Ambulance physical movement
+  }, [towState, towDriverCoords.lat, towDriverCoords.lng, activeTowJob?.latitude, activeTowJob?.longitude]);
+// REAL GEOLOCATION WATCH: El Paramédico transmite su GPS real al Ciudadano
   useEffect(() => {
-    let interval: NodeJS.Timeout;
-    if (ambulanceState === 'dispatched' && activeAmbulanceJob) {
-      interval = setInterval(() => {
-        setAmbulanceCoords(prev => {
-          const latDiff = citizenCoords.lat - prev.lat;
-          const lngDiff = citizenCoords.lng - prev.lng;
-          
-          // Move 20% closer
-          const stepLat = prev.lat + latDiff * 0.2;
-          const stepLng = prev.lng + lngDiff * 0.2;
+    if (activeDevice !== 'ambulance' || ambulanceState !== 'dispatched' || !activeAmbulanceJob) return;
 
-          // Calculate current distance in meters roughly
-          const currentDist = Math.round(
-            Math.sqrt(Math.pow(latDiff * 111000, 2) + Math.pow(lngDiff * 111000, 2))
-          );
-
-          if (currentDist < 30) {
-            setAmbulanceState('completed');
-            triggerPush('🚑 Patrulla en el Sitio', 'La unidad de paramédicos de resguardo ha llegado a tu ubicación.');
-            setAmbulanceMessages(m => [...m, { 
-              sender: 'driver', 
-              text: '🏁 Hemos llegado. La ambulancia está frente a tu ubicación exacta con la unidad de primeros auxilios activa. Comunícate si nos ves.', 
-              time: '19:56' 
-            }]);
-            clearInterval(interval);
-            return prev;
-          }
-
-          setAmbulanceDistance(currentDist);
-          if (activeAmbulanceJob) {
-            setActiveAmbulanceJob({
-              ...activeAmbulanceJob,
-              distance: currentDist
-            });
-          }
-
-          return { lat: stepLat, lng: stepLng };
-        });
-      }, 3500);
+    // AVISO OBLIGATORIO DE GOOGLE PLAY (UBICACIÓN AMBULANCIA)
+    if (!localStorage.getItem('gps_aviso_ambulancia')) {
+      const gpsConsent = window.confirm("SecureFlow recopila datos de ubicación para transmitir el recorrido de la ambulancia al paciente en tiempo real, incluso cuando la app está en segundo plano. ¿Aceptas?");
+      if (!gpsConsent) return;
+      localStorage.setItem('gps_aviso_ambulancia', 'true');
     }
-    return () => clearInterval(interval);
-  }, [ambulanceState, activeAmbulanceJob]);
+
+    const watchId = navigator.geolocation.watchPosition(
+      (pos) => {
+        const lat = pos.coords.latitude;
+        const lng = pos.coords.longitude;
+        
+        // Actualiza su propio mapa
+        setAmbulanceCoords({ lat, lng });
+
+        // Envía el movimiento real a la sala del ciudadano en silencio
+        try {
+          supabase.channel(`room-ambulance-${activeAmbulanceJob.id}`).send({
+            type: 'broadcast',
+            event: 'gps',
+            payload: { lat, lng }
+          });
+        } catch (e) {
+          console.error("Error transmitiendo GPS:", e);
+        }
+      },
+      (err) => console.warn("Error leyendo GPS paramédico:", err),
+      { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 }
+    );
+
+    return () => navigator.geolocation.clearWatch(watchId);
+  }, [activeDevice, ambulanceState, activeAmbulanceJob?.id]);
 
   // Sync scroll on chats
   useEffect(() => {
@@ -1860,7 +2633,97 @@ export default function App() {
   useEffect(() => {
     if (towChatScrollRef.current) towChatScrollRef.current.scrollTop = towChatScrollRef.current.scrollHeight;
   }, [towMessages]);
+// =========================================================================
+  // CONEXIÓN REAL A N8N PARA EL AGENTE IA DE LA AMBULANCIA
+  // =========================================================================
+  const handleSendAmbulanceAI = async () => {
+    if (!ambulanceAgentInput.trim()) return;
 
+    const userText = ambulanceAgentInput.trim();
+    const timeStr = new Date().toLocaleTimeString('es-VE', { hour: '2-digit', minute: '2-digit', hour12: false });
+    
+    // 1. Muestra tu mensaje en pantalla
+    const newMessages = [...ambulanceAgentMessages, { 
+      sender: 'user' as const, 
+      text: userText, 
+      time: timeStr
+    }];
+    setAmbulanceAgentMessages(newMessages);
+    setAmbulanceAgentInput('');
+    
+    // 2. Enciende la animación de "Analizando..."
+    setIsAmbulanceSupportPending(true); 
+
+    try {
+      // 3. DISPARO REAL AL WEBHOOK DE N8N
+      const n8nWebhookUrl = 'https://panel1.quickai.agency/webhook/abogadoya-agente';
+
+      const response = await fetch(n8nWebhookUrl, {
+        method: 'POST',
+        headers: { 
+          'Content-Type': 'application/json',
+          'Accept': 'application/json' 
+        },
+        body: JSON.stringify({
+          // AQUÍ ESTÁ LA SOLUCIÓN: Agregamos todas las variables que n8n espera leer
+          text: userText,
+          message: userText,
+          mensaje: userText, // <-- Esta es la que n8n estaba buscando y no encontraba
+          prompt: userText,
+          input: userText,
+          chatInput: userText,
+          phone: ambulanceProfile.phone || 'No phone',
+          name: ambulanceProfile.name || 'Paramedico',
+          
+          // Tus variables extra:
+          sessionId: sessionUser?.id || 'ambulance-session',
+          role: 'paramedico',
+          timestamp: new Date().toISOString()
+        }),
+      });
+
+      if (!response.ok) throw new Error('Fallo en la respuesta de n8n');
+
+      // 4. Captura la respuesta de n8n (soporta texto plano o JSON)
+      const resText = await response.text();
+      let botReply = "Procesando...";
+      try {
+         const data = JSON.parse(resText);
+         botReply = data.response || data.output || data.text || data.message || resText;
+      } catch(e) {
+         botReply = resText;
+      }
+
+      // Seguro anti-vacíos
+      if (!botReply || botReply.trim() === '') {
+         botReply = "🚑 Protocolo recibido. Procesando...";
+      }
+
+      // 5. Imprime la respuesta de la IA en pantalla
+      setAmbulanceAgentMessages(prev => [
+        ...prev,
+        { 
+          sender: 'bot', 
+          text: botReply, 
+          time: timeStr
+        }
+      ]);
+
+    } catch (error) {
+      console.error("Error en conexión n8n:", error);
+      setAmbulanceAgentMessages(prev => [
+        ...prev,
+        { 
+          sender: 'bot', 
+          text: '⚠️ Error de conexión con la IA. Verifica que el Webhook de n8n esté activo.', 
+          time: timeStr
+        }
+      ]);
+    } finally {
+      // 6. Apaga la animación de "Analizando..."
+      setIsAmbulanceSupportPending(false); 
+    }
+  };
     // AI Agent responder
   const handleAgentSend = async () => {
     const text = agentInput.trim();
@@ -2068,6 +2931,10 @@ export default function App() {
 
   // Triggering the main SOS emergency button pipeline immediately on tap (Instant SOS Panic Button)
   const handleSosTrigger = async () => {
+    // AVISO OBLIGATORIO DE GOOGLE PLAY (TRANSMISIÓN DE VIDEO/AUDIO)
+    const avConsent = window.confirm("SecureFlow requiere acceso a tu cámara y micrófono para iniciar la transmisión de videodefensa en tiempo real y grabarla como evidencia en la nube. ¿Deseas conectar?");
+    if (!avConsent) return;
+
     if (!citizenProfile.phone) {
       showMaterialAlert('⚠️ Configurar Perfil', 'Por favor ingresa primero tu teléfono de contacto en la pestaña de Perfil.');
       setCitizenTab('profile');
@@ -2105,6 +2972,7 @@ export default function App() {
             enable_chat: true,
             start_video_off: false,
             start_audio_off: false,
+            enable_recording: 'cloud'
           }
         })
       });
@@ -2244,161 +3112,322 @@ export default function App() {
     }
   };
 
-  // Professional Citizen Ambulance Despatch Requesting (Insurtech Dispatcher)
-  const handleAmbulanceRequest = () => {
-    const distMeters = 2100; // 2.1 KM
-    const distanceInKm = 2.1;
-    
-    // Config values based on user's vehicle profile (Coche vs Moto)
-    const baseFee = citizenVehicleType === 'coche' ? 30.00 : 20.00;
-    const kmRate = citizenVehicleType === 'coche' ? 5.00 : 3.00;
-    const estimatedPrice = baseFee + distanceInKm * kmRate;
-    
-    const driverReceives = estimatedPrice * 0.80;
-    const platformFee = estimatedPrice * 0.20;
+// =========================================================================
+  // MOTOR DE AMBULANCIAS: SOLICITUD, PAGOS Y VIDEO
+  // =========================================================================
+  
+ const handleAmbulanceRequest = async () => {
+    let realLat = citizenCoords.lat;
+    let realLng = citizenCoords.lng;
+
+    // FORZAR PERMISO GPS: Garantiza que enviemos tu ubicación 100% real al paramédico
+    if (realLat === 0 || realLng === 0) {
+      setIsAuthLoading(true);
+      try {
+        const pos: any = await new Promise((resolve, reject) => {
+          navigator.geolocation.getCurrentPosition(resolve, reject, { enableHighAccuracy: true, timeout: 15000, maximumAge: 0 });
+        });
+        realLat = pos.coords.latitude;
+        realLng = pos.coords.longitude;
+        setCitizenCoords({ lat: realLat, lng: realLng });
+      } catch (err: any) {
+        setIsAuthLoading(false);
+        showMaterialAlert('📡 GPS Requerido', `No podemos solicitar la ambulancia sin tu ubicación real. Activa el GPS de tu celular.`);
+        return;
+      }
+      setIsAuthLoading(false);
+    }
+
+    const ambulanceFee = tariffs.ambulancia?.tarifa_base ?? 50.00;
+    if (citizenBalance < ambulanceFee) {
+      showMaterialAlert('💰 Saldo Insuficiente', `La tarifa base de ambulancia es de $${ambulanceFee.toFixed(2)}. Tu saldo es $${citizenBalance.toFixed(2)}.`);
+      return;
+    }
 
     showMaterialConfirm(
-      '🚑 Solicitar Ambulancia de Guardia',
-      `Hemos ubicado una unidad paramédica de resguardo SecureFlow a 2.1 Km.\n\n` +
-      `Perfil Vehículo: ${citizenVehicleType === 'coche' ? '🚗 Automóvil / Coche' : '🏍️ Motocicleta / Moto'}\n` +
-      `Precio estimado por Km: $${kmRate.toFixed(2)} USD\n\n` +
-      `Detalle Financiero Transparente:\n` +
-      `• Total debitado a tu saldo: $${estimatedPrice.toFixed(2)} USD\n` +
-      `• Acreditado neto al paramédico: $${driverReceives.toFixed(2)} USD (80%)\n` +
-      `• Comisión SecureFlow: $${platformFee.toFixed(2)} USD (20%)\n\n` +
-      `¿Proceder con el despacho médico inmediato?`,
+      '🚑 Solicitar Ambulancia',
+      `¿Deseas despachar una unidad de soporte vital a tu ubicación? Tarifa: $${ambulanceFee.toFixed(2)} USD.`,
       async () => {
-        const emerId = generateUUIDv4();
-        
-        const initialMeta = {
-          citizenName: citizenProfile.name || 'Ciudadano',
-          citizenPhone: citizenProfile.phone || 'No phone',
-          distance: distMeters,
-          price: estimatedPrice,
-          driverReceives,
-          platformFee,
-          vehicleType: citizenVehicleType,
-          messages: []
-        };
-
-        const newJob = {
-          id: emerId,
-          citizenName: citizenProfile.name || 'Ciudadano',
-          citizenPhone: citizenProfile.phone || 'No phone',
-          status: 'calling',
-          latitude: citizenCoords.lat,
-          longitude: citizenCoords.lng,
-          price: estimatedPrice,
-          distance: distMeters
-        };
-
         setAmbulanceState('proposed');
-        setActiveAmbulanceJob(newJob);
-        setAmbulanceMessages([]);
-        setAmbulanceCoords({lat: 10.4780, lng: -66.8960});
-        setAmbulanceDistance(distMeters);
         setIsAmbulanceWindowOpen(false);
         setIsAmbulanceDailyCoActive(false);
+        const emerId = generateUUIDv4();
+        setAmbulanceMessages([]);
+
+        triggerPush('🚑 Buscando Unidad', 'Rastreando la ambulancia más cercana a tu ubicación...');
+        
+        let dailyUrlGenerated = `https://iframe.daily.co/secureflow-ambulancia-${emerId.toLowerCase()}`;
+        try {
+          const dailyResponse = await fetch('https://api.daily.co/v1/rooms', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer 2d632b78894ae034f72f94e9abd129bdc7a2707741b7c92a4bdc9bd16fe3642a' },
+            body: JSON.stringify({ properties: { enable_chat: true, start_video_off: false, start_audio_off: false, enable_recording: 'cloud' } })
+          });
+          if (dailyResponse.ok) {
+            const dailyData = await dailyResponse.json();
+            if (dailyData.url) dailyUrlGenerated = dailyData.url;
+          }
+        } catch (e) { console.error('[AMBULANCE WebRTC ERROR]', e); }
+
+        setActiveAmbulanceJob({
+          id: emerId, citizenName: citizenProfile.name, citizenPhone: citizenProfile.phone,
+          status: 'proposed', latitude: realLat, longitude: realLng, dailyRoomUrl: dailyUrlGenerated, price: ambulanceFee
+        });
 
         try {
-          // Sync with db
-          await supabase.from('emergencias_activas').insert({
-            id: emerId,
-            ciudadano_id: sessionUser?.id || null,
-            estado: 'buscando',
-            ubicacion_texto: citizenProfile.city || 'Caracas',
-            ubicacion_lat: citizenCoords.lat,
-            ubicacion_lng: citizenCoords.lng,
-            tarifa_aplicada: estimatedPrice,
-            sala_webrtc_url: "https://meet.jit.si/SecureFlow-Ambulance-" + emerId
+          await supabase.from('asistencias_ambulancias').insert({
+            id: emerId, ciudadano_id: sessionUser?.id || null, estado: 'buscando',
+            ubicacion_lat: realLat, ubicacion_lng: realLng,
+            costo_total: ambulanceFee, sala_webrtc_url: dailyUrlGenerated
           });
-          triggerPush('🚑 Ambulancia Solicitada', 'Buscando la unidad de paramédicos de guardia oficial más cercana...');
-        } catch (e) {
-          console.error("Error creating calling_ambulance in Supabase", e);
-        }
+        } catch (e) {}
       }
     );
   };
 
-  // SecureFlow Telemedicine Video Consultation Request
-  const handleMedicRequest = () => {
-    if (citizenBalance < 20.0) {
-      showMaterialAlert(
-        '💰 Saldo Insuficiente',
-        `La tarifa reducida por telemedicina SOS con doctor de guardia es de $20.00. Tu saldo actual es de $${citizenBalance.toFixed(2)}. Por favor, recarga saldo presionando "Ver mi Saldo".`
+  const handleFinalizeAmbulanceJob = async () => {
+    if (!activeAmbulanceJob) return;
+
+    try {
+      const { data: emer } = await supabase
+        .from('asistencias_ambulancias')
+        .select('*')
+        .eq('id', activeAmbulanceJob.id)
+        .maybeSingle();
+
+      const citizenId = emer?.ciudadano_id;
+      if (!citizenId) {
+        showMaterialAlert('⚠️ Error de Transacción', 'No se ha encontrado el identificador del ciudadano asociado a este servicio.');
+        return;
+      }
+
+      const { data: citizenUser } = await supabase
+        .from('usuarios')
+        .select('tipo_vehiculo, vehicle_selection')
+        .eq('auth_id', citizenId)
+        .maybeSingle();
+
+      const vType = citizenUser?.vehicle_selection || citizenUser?.tipo_vehiculo || 'coche';
+
+      const distanceInKm = (activeAmbulanceJob.distance || 2100) / 1000;
+      const baseFee = vType === 'coche' ? 30.00 : 20.00;
+      const kmRate = vType === 'coche' ? 5.00 : 3.00;
+      const calculatedPrice = baseFee + distanceInKm * kmRate;
+
+      const driverReceives = calculatedPrice * 0.80;
+      const platformFee = calculatedPrice * 0.20;
+
+      showMaterialConfirm(
+        '🚑 Finalizar Despacho Clínico',
+        `¿Confirmas la entrega exitosa del asegurado en la sala clínica?\n\n` +
+        `• Tarifa total calculada: $${calculatedPrice.toFixed(2)} USD\n` +
+        `• Pago neto paramédico: $${driverReceives.toFixed(2)} USD (80%)\n` +
+        `• Comisión plataforma: $${platformFee.toFixed(2)} USD (20%)`,
+        async () => {
+          try {
+            setIsAuthLoading(true);
+
+            const { error: ambUpdateErr } = await supabase
+              .from('asistencias_ambulancias')
+              .update({ estado: 'finalizada' })
+              .eq('id', activeAmbulanceJob.id);
+            if (ambUpdateErr) throw ambUpdateErr;
+
+            const { data: balanceRow } = await supabase
+              .from('saldos')
+              .select('creditos_disponibles')
+              .eq('usuario_id', citizenId)
+              .maybeSingle();
+
+            const newClientBal = Math.max(0, (balanceRow?.creditos_disponibles || 35.0) - calculatedPrice);
+            await supabase
+              .from('saldos')
+              .update({ creditos_disponibles: newClientBal })
+              .eq('usuario_id', citizenId);
+
+            setCitizenBalance(newClientBal);
+
+            const { data: profBalRow } = await supabase
+              .from('saldos_ambulancias')
+              .select('balance')
+              .eq('user_id', sessionUser?.id)
+              .maybeSingle();
+
+            const newProfBal = (profBalRow?.balance || 0.00) + driverReceives;
+
+           await supabase
+              .from('saldos_ambulancias')
+              .upsert({
+                user_id: sessionUser?.id,
+                balance: newProfBal,
+                updated_at: new Date().toISOString()
+              }, { onConflict: 'user_id' });
+
+            setAmbulanceBalanceClean(newProfBal);
+            setTotalAmbulanceEarnings(newProfBal); // <-- ACTUALIZA EL DASHBOARD DE INMEDIATO
+
+            // Resolución del ID real para que aparezca bien en el historial
+            const { data: usrRow } = await supabase.from('usuarios').select('id').eq('auth_id', sessionUser?.id).maybeSingle();
+            const aUsrId = usrRow?.id || sessionUser?.id;
+
+            await supabase.from('historial_comisiones').insert({
+              servicio_id: activeAmbulanceJob.id,
+              tipo_servicio: 'ambulancia',
+              profesional_id: aUsrId,
+              cliente_id: citizenId,
+              monto_cobrado: calculatedPrice,
+              ganancia_profesional: driverReceives,
+              comision_secureflow: platformFee
+            });
+
+            setCompletedAmbulanceSessions(prev => prev + 1);
+            setAmbulanceState('idle');
+            setActiveAmbulanceJob(null);
+            showMaterialAlert('✅ Concluido', `Traslado completado de forma real. Se cargaron $${calculatedPrice.toFixed(2)} USD de la cuenta del afiliado.`);
+          } catch (e) {
+            console.error(e);
+            showMaterialAlert('❌ Error Grave', 'Error procesando transacciones reales en Supabase.');
+          } finally {
+            setIsAuthLoading(false);
+          }
+        }
       );
+    } catch (err) {
+      console.error(err);
+      showMaterialAlert('❌ Error de Lectura', 'No se pudo conectar con la base de datos para calcular la tarifa.');
+    }
+  };
+
+
+
+  
+// SecureFlow Telemedicine Video Consultation Request
+  const handleMedicRequest = () => {
+    const medicalFee = tariffs.medico?.tarifa_base ?? 20.00;
+    if (citizenBalance < medicalFee) {
+      showMaterialAlert('💰 Saldo Insuficiente', `La tarifa por consulta médica es de $${medicalFee.toFixed(2)}. Tu saldo es $${citizenBalance.toFixed(2)}. Por favor, recarga.`);
       return;
     }
 
     showMaterialConfirm(
       '🏥 Chat & Consulta Médica',
-      `¿Deseas activar una consulta médica inmediata con el médico cirujano de guardia? Podrán chatear primero y activar videollamada si ambos están de acuerdo. Tarifa: $20.00 USD.`,
+      `¿Deseas activar una consulta médica inmediata con el médico cirujano de guardia? Podrán chatear primero y activar videollamada si ambos están de acuerdo. Tarifa: $${medicalFee.toFixed(2)} USD.`,
       async () => {
         setMedicState('calling');
         setIsMedicWindowOpen(false);
         setIsMedicDailyCoActive(false);
         const emerId = generateUUIDv4();
-        
         setMedicMessages([]);
 
-        triggerPush('🏥 Buscando Médico de Guardia', 'Esperando conexión segura con el especialista de guardia...');
+        triggerPush('🏥 Buscando Especialista', 'Esperando conexión segura con el médico de guardia...');
         
-        const newEmer = {
-          id: emerId,
-          citizenName: citizenProfile.name,
-          citizenPhone: citizenProfile.phone,
-          citizenCity: citizenProfile.city,
-          status: 'calling',
-          latitude: citizenCoords.lat,
-          longitude: citizenCoords.lng
-        };
-        setActiveMedicEmergency(newEmer);
-        setIsLiveVideoActive(false);
+        let dailyUrlGenerated = `https://iframe.daily.co/secureflow-medico-${emerId.toLowerCase()}`;
+        try {
+          const dailyResponse = await fetch('https://api.daily.co/v1/rooms', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer 2d632b78894ae034f72f94e9abd129bdc7a2707741b7c92a4bdc9bd16fe3642a' },
+            body: JSON.stringify({ properties: { enable_chat: true, start_video_off: false, start_audio_off: false, enable_recording: 'cloud' } })
+          });
+          if (dailyResponse.ok) {
+            const dailyData = await dailyResponse.json();
+            if (dailyData.url) dailyUrlGenerated = dailyData.url;
+          }
+        } catch (e) { console.error('[MEDIC WebRTC ERROR]', e); }
+
+        setActiveMedicEmergency({
+          id: emerId, citizenName: citizenProfile.name, citizenPhone: citizenProfile.phone,
+          status: 'calling', latitude: citizenCoords.lat, longitude: citizenCoords.lng, dailyRoomUrl: dailyUrlGenerated
+        });
 
         try {
-          await supabase.from('emergencias_activas').insert({
+          const { error: insertErr } = await supabase.from('asistencias_medicas').insert({
             id: emerId,
             ciudadano_id: sessionUser?.id || null,
             estado: 'buscando',
-            ubicacion_texto: citizenProfile.city || 'Caracas',
             ubicacion_lat: citizenCoords.lat,
             ubicacion_lng: citizenCoords.lng,
-            tarifa_aplicada: 20.0,
-            sala_webrtc_url: "https://meet.jit.si/SecureFlow-Medic-" + emerId
+            costo_total: medicalFee,
+            sala_webrtc_url: dailyUrlGenerated
           });
           
-          // Also trigger webhook for doctor emergency just in case! 
-          const targetUrl = 'https://panel1.quickai.agency/webhook/abogadoya/emergencia';
-          await fetch(targetUrl, {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-              'Accept': 'application/json'
-            },
-            body: JSON.stringify({
-              id: emerId,
-              name: citizenProfile.name,
-              nombre: citizenProfile.name,
-              phone: citizenProfile.phone,
-              telefono_contacto: alertContacts.tel1 || citizenProfile.phone,
-              city: citizenProfile.city,
-              latitude: citizenCoords.lat,
-              longitude: citizenCoords.lng,
-              maps_link: `https://www.google.com/maps?q=${citizenCoords.lat},${citizenCoords.lng}`,
-              timestamp: new Date().toLocaleString('es-ES'),
-              service_type: 'medical_emergency',
-              emergency_contacts: [
-                { name: alertContacts.name1, phone: alertContacts.tel1 },
-                { name: alertContacts.name2, phone: alertContacts.tel2 }
-              ]
-            })
-          });
-        } catch (e) {
-          console.error("Error creating calling_medic in Supabase", e);
+          // Si Supabase lo bloquea, lo mostramos en pantalla de inmediato
+          if (insertErr) {
+            console.error("Error BD:", insertErr);
+            showMaterialAlert("❌ Error de Conexión", "La base de datos rechazó la solicitud. Detalles: " + insertErr.message);
+            setMedicState('idle');
+            setActiveMedicEmergency(null);
+          }
+        } catch (e) { 
+          console.error("Error creating calling_medic", e); 
         }
       }
     );
   };
+
+  // Función de Pago y Cierre Real de Telemedicina
+  const handleEndMedicSession = async () => {
+    if (!activeMedicEmergency) return;
+    const rate = activeMedicEmergency.price || 20.00;
+
+    showMaterialConfirm(
+      '🏥 Finalizar y Cobrar Sesión',
+      `¿Deseas cerrar oficialmente la teleconsulta médica? Esto debitará $${rate.toFixed(2)} USD del paciente y registrará tus honorarios.`,
+      async () => {
+        setIsAuthLoading(true);
+        try {
+          await supabase.from('asistencias_medicas').update({ estado: 'finalizada' }).eq('id', activeMedicEmergency.id);
+
+          const { data: emerData } = await supabase.from('asistencias_medicas').select('ciudadano_id').eq('id', activeMedicEmergency.id).maybeSingle();
+          const citizenAuthId = emerData?.ciudadano_id;
+
+          if (citizenAuthId) {
+            const { data: balanceRow } = await supabase.from('saldos').select('creditos_disponibles').eq('usuario_id', citizenAuthId).maybeSingle();
+            const newClientBal = Math.max(0, (balanceRow?.creditos_disponibles || 0) - rate);
+            await supabase.from('saldos').update({ creditos_disponibles: newClientBal }).eq('usuario_id', citizenAuthId);
+          }
+
+          const driverReceives = rate * 0.80;
+          const platformFee = rate * 0.20;
+
+          const { data: profBalRow } = await supabase.from('saldos_medicos').select('balance').eq('user_id', sessionUser?.id).maybeSingle();
+          const newProfBal = (profBalRow?.balance || 0.00) + driverReceives;
+
+          await supabase.from('saldos_medicos').upsert({ user_id: sessionUser?.id, balance: newProfBal, updated_at: new Date().toISOString() }, { onConflict: 'user_id' });
+          setMedicBalanceClean(newProfBal);
+
+          const { data: usrRow } = await supabase.from('usuarios').select('id').eq('auth_id', sessionUser?.id).maybeSingle();
+          const mUsrId = usrRow?.id || sessionUser?.id;
+
+          await supabase.from('historial_comisiones').insert({
+            servicio_id: activeMedicEmergency.id,
+            tipo_servicio: 'medico',
+            profesional_id: mUsrId,
+            cliente_id: citizenAuthId,
+            monto_cobrado: rate,
+            ganancia_profesional: driverReceives,
+            comision_secureflow: platformFee
+          });
+
+          setCompletedMedicSessions(c => c + 1);
+          setTotalMedicEarnings(prev => prev + driverReceives);
+          setIsLiveVideoActive(false);
+          setMedicState('idle');
+          setActiveMedicEmergency(null);
+          showMaterialAlert('✅ Consulta Concluida', 'Sesión telemédica terminada. Diagnóstico y receta encriptada enviados al expediente del paciente.');
+
+          const { data: hist } = await supabase.from('historial_comisiones').select('*').eq('profesional_id', mUsrId).eq('tipo_servicio', 'medico').order('created_at', { ascending: false });
+          if (hist) setMedicHistory(hist);
+
+        } catch (e: any) {
+          showMaterialAlert('❌ Error al Finalizar', e.message || 'No se pudo procesar el cobro.');
+        } finally {
+          setIsAuthLoading(false);
+        }
+      }
+    );
+  };
+
+  
 
   const handleAmbulanceSupportSend = async () => {
     const text = ambulanceSupportInput.trim();
@@ -2588,32 +3617,33 @@ export default function App() {
       }
 
       try {
-        const dbRole = selectRole === 'lawyer' ? 'abogado' :
-                       selectRole === 'citizen' ? 'ciudadano' :
-                       selectRole === 'driver' ? 'conductor' :
-                       selectRole === 'ambulance' ? 'paramedico' :
-                       selectRole === 'medic' ? 'medico' : selectRole;
+        const dbRole = selectRole === 'lawyer' ? 'lawyer' :
+                       selectRole === 'citizen' ? 'citizen' :
+                       selectRole === 'driver' ? 'driver' :
+                       selectRole === 'ambulance' ? 'ambulance' :
+                       selectRole === 'medic' ? 'medic' : selectRole;
 
         const finalName = citizenProfile.name || 'Usuario SecureFlow';
         const finalPhone = citizenProfile.phone || '584241234567';
         const chosenRole = selectRole;
-        const rolSeleccionado = chosenRole === 'driver' ? 'gruero' : dbRole;
+        const rolSeleccionado = dbRole;
 
         const signupMetadata = {
           nombre_completo: finalName,
           telefono: finalPhone,
+          phone: finalPhone,
+          rol: rolSeleccionado,
           role: rolSeleccionado,
           tipo_vehiculo: citizenVehicleType || 'coche',
           inpreabogado: impreAbogadoField || '',
-          ciudad: citizenProfile.city || 'Caracas',
+          ciudad: selectedCity,
           cedula: ciudadanoIdField || '',
           especialidad: selectRole === 'lawyer' ? 'Defensa Penal' : (selectRole === 'medic' ? 'Triaje de Guardia' : ''),
-          impre_bogado: impreAbogadoField || null,
-          ciudadano_id: ciudadanoIdField || null,
-          grua_id: gruaIdField || null,
-          credential_ambulance: credentialAmbulanceField || null,
-          credential_medic: credentialMedicField || null,
-          selfie_url: selfieCaptured
+          impre_bogado: impreAbogadoField || '',
+          ciudadano_id: ciudadanoIdField || '',
+          grua_id: gruaIdField || '',
+          credential_ambulance: credentialAmbulanceField || '',
+          credential_medic: credentialMedicField || ''
         };
 
         // PASO 1 (Autenticación pura)
@@ -2630,17 +3660,36 @@ export default function App() {
         if (authData?.user) {
           const uId = authData.user.id;
 
+          // Forzar sincronización de sesión en el cliente Supabase para satisfacer políticas de RLS
+          if (authData.session) {
+            await supabase.auth.setSession(authData.session);
+          }
+
+          // Guardar la Selfie Biométrica en la tabla credenciales_biometricas
+          try {
+            if (selfieCaptured) {
+              await supabase.from('credenciales_biometricas').insert([{
+                user_id: uId,
+                foto_base64: selfieCaptured,
+                rol_asignado: chosenRole
+              }]);
+            }
+          } catch (biometricErr) {
+            console.warn("Aviso: Biometría no guardada", biometricErr);
+          }
+
           if (chosenRole === 'driver') {
             // REGISTRO DIRECTO Y EXCLUSIVO DE GRUEROS (Sin insertar en 'usuarios')
-            const { error: grueroErr } = await supabase.from('grueros').insert([{
-              id: uId,
-              auth_id: uId,
+            const { error: grueroErr } = await supabase.from('grueros').upsert([{
+              id: authData.user.id,
+              auth_id: authData.user.id,
               nombre_completo: finalName,
-              placa_vehiculo: gruaIdField || 'A92B45X',
+              placa_vehiculo: gruaIdField.trim() || 'Por Asignar',
               telefono: finalPhone,
               tarifa_base: 30.00,
               precio_km: 2.50,
-              deuda_comisiones: 0
+              deuda_comisiones: 0,
+              ciudad: selectedCity
             }]);
 
             if (grueroErr) {
@@ -2661,8 +3710,8 @@ export default function App() {
               name: finalName,
               email: authEmail.trim(),
               phone: finalPhone,
-              city: citizenProfile.city || 'Caracas',
-              vehiclePlate: gruaIdField || 'A92B45X'
+              city: selectedCity,
+              vehiclePlate: gruaIdField.trim() || 'Por Asignar'
             });
             setDriverBalance(0.00);
 
@@ -2671,24 +3720,53 @@ export default function App() {
             setSessionUser(authData.user);
             setActiveDevice('driver');
 
-          } else {
-            // PARA TODOS LOS DEMÁS ROLES: PASO 2 (Identidad Base obligatoria)
-            const { error: dbErr } = await supabase.from('usuarios').insert([{
-              id: uId,
-              auth_id: uId,
-              rol: rolSeleccionado,
-              role: rolSeleccionado,
+          } else if (chosenRole === 'medic') {
+            // REGISTRO DIRECTO Y EXCLUSIVO DE MÉDICOS (Sin insertar en 'usuarios')
+            const { error: medicoErr } = await supabase.from('medicos').upsert([{
+              id: authData.user.id,
+              auth_id: authData.user.id,
               nombre_completo: finalName,
               telefono: finalPhone,
-              cedula: ciudadanoIdField || '',
-              email: authEmail.trim(),
-              tipo_vehiculo: chosenRole === 'citizen' ? citizenVehicleType : null,
-              vehicle_selection: chosenRole === 'citizen' ? citizenVehicleType : null,
-              contacto_emergencia_1_nombre: alertContacts.name1 || 'Mi Madre',
-              contacto_emergencia_1_telefono: alertContacts.tel1 || '584249998877',
-              contacto_emergencia_2_nombre: alertContacts.name2 || 'Mi Hermano',
-              contacto_emergencia_2_telefono: alertContacts.tel2 || '584126665544'
+              licencia_medica: credentialMedicField.trim() || 'MSAS-PENDIENTE',
+              especialidad: 'Medicina General y Triaje',
+              ciudad: selectedCity,
+              tarifa_base: 20.00,
+              deuda_comisiones: 0
             }]);
+
+            if (medicoErr) throw medicoErr;
+
+            const { error: sldMedErr } = await supabase.from('saldos_medicos').insert([{
+              user_id: uId,
+              balance: 0.00,
+              updated_at: new Date().toISOString()
+            }]);
+
+            setMedicProfile({
+              name: finalName,
+              email: authEmail.trim(),
+              phone: finalPhone,
+              city: selectedCity,
+              licenseNumber: credentialMedicField.trim() || 'MSAS-PENDIENTE',
+              specialty: 'Medicina General y Triaje'
+            });
+            setMedicBalanceClean(0.00);
+
+            showMaterialAlert('🛡️ Registro Exitoso', `Tu cuenta SecureFlow con rol de Médico de Guardia ha sido creada correctamente.`);
+            setSessionUser(authData.user);
+            setActiveDevice('medic');
+
+          } else {
+            // PARA TODOS LOS DEMÁS ROLES: PASO 2 (Identidad Base obligatoria)
+            const { error: dbErr } = await supabase.from('usuarios').upsert([{
+              id: uId,
+              auth_id: uId,
+              nombre_completo: citizenProfile.name || 'Usuario SecureFlow',
+              telefono: citizenProfile.phone || '584241234567',
+              email: authEmail.trim(),
+              rol: rolSeleccionado,
+              ciudad: selectedCity
+            }], { onConflict: 'auth_id' });
 
             if (dbErr) {
               console.error("Error al registrar identidad base en usuarios:", dbErr);
@@ -2714,7 +3792,7 @@ export default function App() {
                 nombre_completo: finalName,
                 telefono: finalPhone,
                 email: authEmail.trim(),
-                ciudad: citizenProfile.city || 'Caracas',
+                ciudad: selectedCity,
                 inpreabogado: impreAbogadoField || '',
                 especialidad: 'Defensa Penal'
               }]);
@@ -2727,7 +3805,7 @@ export default function App() {
                 name: finalName,
                 email: authEmail.trim(),
                 phone: finalPhone,
-                city: citizenProfile.city || 'Caracas',
+                city: selectedCity,
                 licenseNumber: impreAbogadoField,
                 specialty: 'Derecho Procesal & Penal'
               });
@@ -2738,27 +3816,38 @@ export default function App() {
                 name: finalName,
                 email: authEmail.trim(),
                 phone: finalPhone,
-                city: citizenProfile.city || 'Caracas'
+                city: selectedCity
               });
 
             } else if (chosenRole === 'ambulance') {
+              // 1. Guardar en tabla real 'paramedicos'
+              const { error: paramedicoErr } = await supabase.from('paramedicos').upsert([{
+                id: authData.user.id,
+                auth_id: authData.user.id,
+                nombre_completo: finalName,
+                telefono: finalPhone,
+                placa_ambulancia: credentialAmbulanceField || 'AMB-402X',
+                ciudad: selectedCity,
+                tarifa_base: 50.00,
+                deuda_comisiones: 0
+              }]);
+              
+              if (paramedicoErr) console.error("Error BD Paramedicos:", paramedicoErr);
+
+              // 2. Guardar saldo
               const { error: sldAmbErr } = await supabase.from('saldos_ambulancias').insert([{
                 user_id: uId,
                 balance: 0.00,
                 updated_at: new Date().toISOString()
               }]);
-              if (sldAmbErr) {
-                console.warn('Non-blocking saldos_ambulancias insert info:', sldAmbErr);
-              }
-
+              
               setAmbulanceProfile({
                 name: finalName,
                 email: authEmail.trim(),
                 phone: finalPhone,
-                city: citizenProfile.city || 'Caracas',
+                city: selectedCity,
                 vehiclePlate: credentialAmbulanceField || 'AMB-402X'
               });
-
             } else if (chosenRole === 'medic') {
               const { error: sldMedErr } = await supabase.from('saldos_medicos').insert([{
                 user_id: uId,
@@ -2773,7 +3862,7 @@ export default function App() {
                 name: finalName,
                 email: authEmail.trim(),
                 phone: finalPhone,
-                city: citizenProfile.city || 'Caracas',
+                city: selectedCity,
                 licenseNumber: credentialMedicField || 'MSAS-42.501'
               });
             }
@@ -2818,8 +3907,282 @@ export default function App() {
           showMaterialAlert('🔑 Acceso Correcto', 'Bienvenido de vuelta al ecosistema de defensa de SecureFlow.');
         }
       } catch (err: any) {
-        console.error(err);
-        showMaterialAlert('❌ Error de Acceso', err.message || 'Verifica tu correo o contraseña.');
+        console.error("Login attempt failed:", err);
+        const errMsg = err?.message || '';
+        
+        if (errMsg.toLowerCase().includes('invalid login credentials') || errMsg.toLowerCase().includes('invalid_config') || errMsg.toLowerCase().includes('user not found')) {
+          // If credentials do not exist, automatically transition to register mode to make it ultra-resilient
+          console.log("No existing user found or invalid credentials on clean database. Autoprovisioning user profile on the fly...");
+          try {
+            const dbRole = selectRole === 'lawyer' ? 'lawyer' :
+                           selectRole === 'citizen' ? 'citizen' :
+                           selectRole === 'driver' ? 'driver' :
+                           selectRole === 'ambulance' ? 'ambulance' :
+                           selectRole === 'medic' ? 'medic' : selectRole;
+
+            const finalName = citizenProfile.name || 'Usuario SecureFlow';
+            const finalPhone = citizenProfile.phone || '584241234567';
+            const chosenRole = selectRole;
+            const rolSeleccionado = dbRole;
+
+            const signupMetadata = {
+              nombre_completo: finalName,
+              telefono: finalPhone,
+              phone: finalPhone,
+              rol: rolSeleccionado,
+              role: rolSeleccionado,
+              tipo_vehiculo: citizenVehicleType || 'coche',
+              inpreabogado: impreAbogadoField || 'INPRE-98.421',
+              ciudad: selectedCity,
+              cedula: ciudadanoIdField || 'V-12.345.678',
+              especialidad: selectRole === 'lawyer' ? 'Defensa Penal' : (selectRole === 'medic' ? 'Triaje de Guardia' : ''),
+              impre_bogado: impreAbogadoField || 'INPRE-98.421',
+              ciudadano_id: ciudadanoIdField || 'V-12.345.678',
+              grua_id: gruaIdField || 'Por Asignar',
+              credential_ambulance: credentialAmbulanceField || 'AMB-402X',
+              credential_medic: credentialMedicField || 'MSAS-42.501'
+            };
+
+            const { data: authData, error: signupErr } = await supabase.auth.signUp({
+              email: authEmail.trim(),
+              password: authPassword.trim(),
+              options: {
+                data: signupMetadata
+              }
+            });
+
+            if (signupErr) throw signupErr;
+
+            if (authData?.user) {
+              const uId = authData.user.id;
+
+              // Forzar sincronización de sesión en el cliente Supabase para satisfacer políticas de RLS
+              if (authData.session) {
+                await supabase.auth.setSession(authData.session);
+              }
+
+              // Guardar la Selfie Biométrica en la tabla credenciales_biometricas
+              try {
+                if (selfieCaptured) {
+                  await supabase.from('credenciales_biometricas').insert([{
+                    user_id: uId,
+                    foto_base64: selfieCaptured,
+                    rol_assigned: chosenRole
+                  }]);
+                }
+              } catch (biometricErr) {
+                console.warn("Aviso: Biometría no guardada", biometricErr);
+              }
+
+              if (chosenRole === 'driver') {
+                // REGISTRO DIRECTO Y EXCLUSIVO DE GRUEROS (Sin insertar en 'usuarios')
+                const { error: grueroErr } = await supabase.from('grueros').upsert([{
+                  id: authData.user.id,
+                  auth_id: authData.user.id,
+                  nombre_completo: finalName,
+                  placa_vehiculo: gruaIdField.trim() || 'A92sinB45X',
+                  telefono: finalPhone,
+                  tarifa_base: 30.00,
+                  precio_km: 2.50,
+                  deuda_comisiones: 0,
+                  ciudad: selectedCity
+                }]);
+
+                if (grueroErr) {
+                  console.error("Error al registrar perfil técnico directo en grueros:", grueroErr);
+                  throw grueroErr;
+                }
+
+                const { error: sldGruerErr } = await supabase.from('saldos_grueros').insert([{
+                  user_id: uId,
+                  balance: 0.00,
+                  updated_at: new Date().toISOString()
+                }]);
+                if (sldGruerErr) {
+                  console.warn('Non-blocking saldos_grueros insert info:', sldGruerErr);
+                }
+
+                setDriverProfile({
+                  name: finalName,
+                  email: authEmail.trim(),
+                  phone: finalPhone,
+                  city: selectedCity,
+                  vehiclePlate: gruaIdField.trim() || 'sinplaca'
+                });
+                setDriverBalance(0.00);
+
+                // PASO 4 (Redirección con rol exacto para gruero)
+                showMaterialAlert('🛡️ Acceso de Prueba', `No se encontró la cuenta. Hemos creado una nueva cuenta de prueba con tu rol de Chofer de Grúa automáticamente.`);
+                setSessionUser(authData.user);
+                setActiveDevice('driver');
+
+              } else if (chosenRole === 'medic') {
+                // REGISTRO FALLBACK EXCLUSIVO MÉDICOS
+                const { error: medicoErr } = await supabase.from('medicos').upsert([{
+                  id: authData.user.id,
+                  auth_id: authData.user.id,
+                  nombre_completo: finalName,
+                  telefono: finalPhone,
+                  licencia_medica: credentialMedicField.trim() || 'MSAS-42.501',
+                  especialidad: 'Medicina General y Triaje',
+                  ciudad: selectedCity,
+                  tarifa_base: 20.00,
+                  deuda_comisiones: 0
+                }]);
+
+                if (medicoErr) throw medicoErr;
+
+                await supabase.from('saldos_medicos').insert([{ user_id: uId, balance: 0.00, updated_at: new Date().toISOString() }]);
+
+                setMedicProfile({
+                  name: finalName,
+                  email: authEmail.trim(),
+                  phone: finalPhone,
+                  city: selectedCity,
+                  licenseNumber: credentialMedicField.trim() || 'MSAS-42.501',
+                  specialty: 'Medicina General y Triaje'
+                });
+                setMedicBalanceClean(0.00);
+
+                showMaterialAlert('🛡️ Acceso de Prueba', `No se encontró la cuenta. Hemos creado una nueva cuenta de prueba con tu rol de Médico automáticamente.`);
+                setSessionUser(authData.user);
+                setActiveDevice('medic');
+
+              } else {
+                // PARA TODOS LOS DEMÁS ROLES: PASO 2 (Identidad Base obligatoria)
+                const { error: dbErr } = await supabase.from('usuarios').upsert([{
+                  id: uId,
+                  auth_id: uId,
+                  nombre_completo: citizenProfile.name || 'Usuario SecureFlow',
+                  telefono: citizenProfile.phone || '584241234567',
+                  email: authEmail.trim(),
+                  rol: rolSeleccionado,
+                  ciudad: selectedCity
+                }], { onConflict: 'auth_id' });
+
+                if (dbErr) {
+                  console.error("Error al registrar identidad base en usuarios:", dbErr);
+                  throw dbErr;
+                }
+
+                // Initialize citizen/user balance
+                const { error: sldErr } = await supabase.from('saldos').insert([{
+                  usuario_id: uId,
+                  plan_activo: 'estandar',
+                  creditos_disponibles: 35.0,
+                  consultas_ia_usadas: 0
+                }]);
+                if (sldErr) {
+                  console.warn('Non-blocking saldos insert info:', sldErr);
+                }
+
+                // PASO 3 (Perfil Profesional Exclusivo y otros roles consecuentes)
+                if (chosenRole === 'lawyer') {
+                  const { error: abgErr } = await supabase.from('abogados').insert([{
+                    id: uId,
+                    auth_id: uId,
+                    nombre_completo: finalName,
+                    telefono: finalPhone,
+                    email: authEmail.trim(),
+                    ciudad: selectedCity,
+                    inpreabogado: impreAbogadoField || 'INPRE-98.421',
+                    especialidad: 'Defensa Penal'
+                  }]);
+                  if (abgErr) {
+                    console.error("Error al registrar abogado:", abgErr);
+                    throw abgErr;
+                  }
+                  
+                  setLawyerProfile({
+                    name: finalName,
+                    email: authEmail.trim(),
+                    phone: finalPhone,
+                    city: selectedCity,
+                    licenseNumber: impreAbogadoField || 'INPRE-98.421',
+                    specialty: 'Derecho Procesal & Penal'
+                  });
+                  setTotalLawyerEarnings(0.00);
+
+                } else if (chosenRole === 'citizen') {
+                  setCitizenProfile({
+                    name: finalName,
+                    email: authEmail.trim(),
+                    phone: finalPhone,
+                    city: selectedCity
+                  });
+
+             } else if (chosenRole === 'ambulance') {
+                  const { error: paramedicoErr } = await supabase.from('paramedicos').upsert([{
+                    id: authData.user.id,
+                    auth_id: authData.user.id,
+                    nombre_completo: finalName,
+                    telefono: finalPhone,
+                    placa_ambulancia: credentialAmbulanceField || 'AMB-TEST',
+                    ciudad: selectedCity,
+                    tarifa_base: 50.00,
+                    deuda_comisiones: 0
+                  }]);
+
+                  await supabase.from('saldos_ambulancias').insert([{
+                    user_id: uId,
+                    balance: 0.00,
+                    updated_at: new Date().toISOString()
+                  }]);
+
+                  setAmbulanceProfile({
+                    name: finalName,
+                    email: authEmail.trim(),
+                    phone: finalPhone,
+                    city: selectedCity,
+                    vehiclePlate: credentialAmbulanceField || 'AMB-TEST'
+                  });
+
+                } else if (chosenRole === 'medic') {
+                  const { error: sldMedErr } = await supabase.from('saldos_medicos').insert([{
+                    user_id: uId,
+                    balance: 0.00,
+                    updated_at: new Date().toISOString()
+                  }]);
+                  if (sldMedErr) {
+                    console.warn('Non-blocking saldos_medicos insert info:', sldMedErr);
+                  }
+
+                  setMedicProfile({
+                    name: finalName,
+                    email: authEmail.trim(),
+                    phone: finalPhone,
+                    city: selectedCity,
+                    licenseNumber: credentialMedicField || 'MSAS-42.501'
+                  });
+                }
+
+                // PASO 4 (Redirección con rol exacto para otros roles)
+                showMaterialAlert('🛡️ Acceso de Prueba', `No se encontró la cuenta. Hemos creado una nueva cuenta de prueba con tu rol de ${chosenRole} automáticamente.`);
+                setSessionUser(authData.user);
+                setActiveDevice(chosenRole as any);
+
+                if (chosenRole === 'citizen') {
+                  const { data: saldoData } = await supabase
+                    .from('saldos')
+                    .select('*')
+                    .eq('usuario_id', uId)
+                    .maybeSingle();
+
+                  if (saldoData) {
+                    setCitizenBalance(Number(saldoData.creditos_disponibles));
+                    setActivePlan(saldoData.plan_activo as any);
+                    setConsultsUsed(Number(saldoData.consultas_ia_usadas));
+                  }
+                }
+              }
+            }
+          } catch (autoRegErr: any) {
+            console.error("Auto registration fallback failed:", autoRegErr);
+            showMaterialAlert('❌ Error de Acceso', err.message || 'Verifica tu correo o contraseña.');
+          }
+        } else {
+          showMaterialAlert('❌ Error de Acceso', err.message || 'Verifica tu correo o contraseña.');
+        }
       } finally {
         setIsAuthLoading(false);
       }
@@ -2854,157 +4217,52 @@ export default function App() {
     return R * c;
   };
 
-  // Real synchronized Requesting of visual roadside assistance towing (Insurtech Dispatcher)
+// Real synchronized Requesting of visual roadside assistance towing (Insurtech Dispatcher)
   const handleTowRequest = async () => {
-    setIsAuthLoading(true);
-    let assignedGrueroId = null;
-    let baseFee = citizenVehicleType === 'coche' ? 20.00 : 12.00;
-    let kmRate = citizenVehicleType === 'coche' ? 3.50 : 2.00;
-    let distanceInKm = 5.4; // default / fallback distance
+    let realLat = citizenCoords.lat;
+    let realLng = citizenCoords.lng;
 
-    try {
-      // Fetch available crane units with joining of grueros details
-      const { data: unitsData, error: fetchErr } = await supabase
-        .from('unidades_grua')
-        .select(`
-          id,
-          gruero_id,
-          estado,
-          lat_actual,
-          lng_actual,
-          grueros (
-            id,
-            tarifa_base,
-            precio_km,
-            nombre_completo,
-            telefono
-          )
-        `)
-        .eq('estado', 'disponible');
-
-      if (fetchErr) {
-        console.warn("Could not fetch available units, error:", fetchErr);
-      }
-
-      let units = unitsData || [];
-
-      // Fallback: If no crane units are found as "disponible", try any "conectado" state units
-      if (units.length === 0) {
-        const { data: connectedUnits } = await supabase
-          .from('unidades_grua')
-          .select(`
-            id,
-            gruero_id,
-            estado,
-            lat_actual,
-            lng_actual,
-            grueros (
-              id,
-              tarifa_base,
-              precio_km,
-              nombre_completo,
-              telefono
-            )
-          `)
-          .eq('estado', 'conectado');
-        if (connectedUnits && connectedUnits.length > 0) {
-          units = connectedUnits;
-        }
-      }
-
-      // Fallback 2: Try fetching any crane units regardless of status
-      if (units.length === 0) {
-        const { data: allUnits } = await supabase
-          .from('unidades_grua')
-          .select(`
-            id,
-            gruero_id,
-            estado,
-            lat_actual,
-            lng_actual,
-            grueros (
-              id,
-              tarifa_base,
-              precio_km,
-              nombre_completo,
-              telefono
-            )
-          `);
-        if (allUnits && allUnits.length > 0) {
-          units = allUnits;
-        }
-      }
-
-      let closestDistance = 999999;
-      let selectedUnit = null;
-
-      if (units && units.length > 0) {
-        for (const unit of units) {
-          const lat = Number(unit.lat_actual);
-          const lng = Number(unit.lng_actual);
-          if (!isNaN(lat) && !isNaN(lng)) {
-            const dist = getHaversineDistance(citizenCoords.lat, citizenCoords.lng, lat, lng);
-            if (dist < closestDistance) {
-              closestDistance = dist;
-              selectedUnit = unit;
-            }
-          }
-        }
-      }
-
-      if (selectedUnit) {
-        assignedGrueroId = selectedUnit.gruero_id;
-        distanceInKm = closestDistance;
-        
-        // Update local crane unit track state
-        setCraneUnitState({
-          lat_actual: Number(selectedUnit.lat_actual) || 10.4900,
-          lng_actual: Number(selectedUnit.lng_actual) || -66.9100
+    // FORZAR PERMISO GPS: Al estar dentro del click del botón, el navegador NO PUEDE bloquear el aviso de permisos.
+    if (realLat === 0 || realLng === 0) {
+      setIsAuthLoading(true);
+      try {
+        const pos: any = await new Promise((resolve, reject) => {
+          navigator.geolocation.getCurrentPosition(resolve, reject, { enableHighAccuracy: true, timeout: 15000, maximumAge: 0 });
         });
-
-        const grueroObj: any = selectedUnit.grueros;
-        if (grueroObj) {
-          baseFee = Number(grueroObj.tarifa_base) || baseFee;
-          kmRate = Number(grueroObj.precio_km) || kmRate;
-        }
-      } else {
-        // If still no unit, select any registered gruero from the db
-        const { data: fallbackGruero } = await supabase
-          .from('grueros')
-          .select('*')
-          .limit(1)
-          .maybeSingle();
-
-        if (fallbackGruero) {
-          assignedGrueroId = fallbackGruero.id;
-          baseFee = Number(fallbackGruero.tarifa_base) || baseFee;
-          kmRate = Number(fallbackGruero.precio_km) || kmRate;
-        }
+        realLat = pos.coords.latitude;
+        realLng = pos.coords.longitude;
+        setCitizenCoords({ lat: realLat, lng: realLng });
+      } catch (err: any) {
+        setIsAuthLoading(false);
+        let msg = "Asegúrate de tener el GPS del celular encendido.";
+        if (err.code === 1) msg = "Denegaste el permiso de ubicación al navegador. Ve a los ajustes y permítelo.";
+        if (err.code === 2) msg = "No hay señal de satélite física en tu posición.";
+        if (err.code === 3) msg = "El GPS tardó demasiado en responder.";
+        showMaterialAlert('📡 GPS Requerido', `No podemos solicitar la grúa sin tu ubicación 100% real.\n\nDetalle: ${msg}`);
+        return;
       }
-    } catch (err) {
-      console.error("Error fetching assigned gruero and units:", err);
-    } finally {
       setIsAuthLoading(false);
     }
 
+    setIsAuthLoading(true);
+    let baseFee = tariffs.grua?.tarifa_base ?? (citizenVehicleType === 'coche' ? 30.00 : 20.00);
+    let kmRate = tariffs.grua?.precio_por_km ?? (citizenVehicleType === 'coche' ? 4.50 : 3.00);
+    
+    let distanceInKm = 5.4; 
     const distMeters = Math.round(distanceInKm * 1000);
     let costoTotal = baseFee + distanceInKm * kmRate;
-    if (costoTotal < baseFee) {
-      costoTotal = baseFee;
-    }
 
-    // Native window.confirm prompt
+    setIsAuthLoading(false);
+
     const userConfirmed = window.confirm(
-      `城乡/Secured GRÚA DETECTADA 🚜\n` +
-      `• Distancia: ${distanceInKm.toFixed(1)} KM\n` +
+      `🚜 SOLICITUD DE ASISTENCIA VIAL\n\n` +
+      `Se emitirá una alerta a todas las unidades de grúa en tu zona.\n\n` +
       `• Tarifa Base: $${baseFee.toFixed(2)} USD\n` +
-      `• Costo total calculado: $${costoTotal.toFixed(2)} USD\n\n` +
-      `¿Aceptar y solicitar?`
+      `• Precio por KM: $${kmRate.toFixed(2)} USD\n\n` +
+      `¿Aceptar y solicitar despacho inmediato?`
     );
 
-    if (!userConfirmed) {
-      return;
-    }
+    if (!userConfirmed) return;
 
     const emerId = generateUUIDv4();
     
@@ -3013,8 +4271,8 @@ export default function App() {
       citizenName: citizenProfile.name || 'Ciudadano',
       citizenPhone: citizenProfile.phone || 'No phone',
       status: 'pending',
-      latitude: citizenCoords.lat,
-      longitude: citizenCoords.lng,
+      latitude: realLat,
+      longitude: realLng,
       price: costoTotal,
       distance: distMeters
     };
@@ -3025,32 +4283,97 @@ export default function App() {
     setTowDailyCoUrl("https://iframe.daily.co/secureflow-tow-" + emerId);
 
     try {
-      // Insertion EXCLUSIVELY into asistencias_viales table
       const vialInsertVal = {
         id: emerId,
         ciudadano_id: sessionUser?.id || null,
-        gruero_id: assignedGrueroId,
-        ubicacion_origen_lat: citizenCoords.lat,
-        ubicacion_origen_lng: citizenCoords.lng,
+        gruero_id: null, 
+        ubicacion_origen_lat: realLat,
+        ubicacion_origen_lng: realLng,
         ubicacion_destino_texto: towDestinationText,
         estado: 'pendiente',
         costo_total: costoTotal,
+        distancia_metros: distMeters,
         sala_webrtc_url: "https://iframe.daily.co/secureflow-tow-" + emerId
       };
 
-      const { data: insertedVialRow } = await supabase
-        .from('asistencias_viales')
-        .insert(vialInsertVal)
-        .select()
-        .maybeSingle();
-
-      if (insertedVialRow) {
-        setActiveVialAssist(insertedVialRow);
-      }
-
+      const { data: insertedVialRow } = await supabase.from('asistencias_viales').insert(vialInsertVal).select().maybeSingle();
+      if (insertedVialRow) setActiveVialAssist(insertedVialRow);
       triggerPush('🚜 Alerta Solicitud Grúa', 'Buscando unidad de grúa disponible en el sector...');
     } catch (e) {
-      console.error("Error creating pending tow row in Supabase asistencias_viales:", e);
+      console.error("Error creating pending tow row in Supabase:", e);
+    }
+  };
+const handleOnTowRequestActivated = async (updated: any) => {
+    // 1. Textos neutros de seguridad (Solo se usarán si la base de datos está vacía)
+    let drName = 'Operador';
+    let drPhone = 'No registrado';
+    let vPlate = 'Sin Placa';
+
+    // 2. Aquí va a Supabase a buscar los DATOS REALES del gruero
+    if (updated.gruero_id) {
+      const { data: grueroRow } = await supabase
+        .from('grueros')
+        .select('nombre_completo, telefono, placa_vehiculo')
+        .eq('id', updated.gruero_id)
+        .maybeSingle();
+      
+      // Si encuentra los datos, sobrescribe los textos neutros por la VERDAD
+      if (grueroRow) {
+        drName = grueroRow.nombre_completo || drName;
+        drPhone = grueroRow.telefono || drPhone;
+        vPlate = grueroRow.placa_vehiculo || vPlate;
+      }
+    }
+
+    // 3. Transición al mapa
+    setTowState('dispatched');
+    setCitizenTab('home');
+
+    setActiveVialAssist(updated);
+    setActiveTowJob({
+      id: updated.id,
+      citizenName: citizenProfile.name || 'Ciudadano',
+      citizenPhone: citizenProfile.phone || 'No registrado',
+      status: 'en_route',
+      latitude: updated.ubicacion_origen_lat || citizenCoords.lat,
+      longitude: updated.ubicacion_origen_lng || citizenCoords.lng,
+      price: updated.costo_total,
+      distance: updated.distancia_metros || 0,
+      driverName: drName,
+      driverPhone: drPhone,
+      vehiclePlate: vPlate,
+      gruero_id: updated.gruero_id
+    });
+
+    showMaterialAlert('🚜 Operador en Camino', `El operador de grúa ${drName} con placa ${vPlate} ha aceptado tu solicitud.`);
+  };
+
+  const handleCancelTowRequest = async () => {
+    const jobId = activeTowJob?.id || activeVialAssist?.id;
+    if (!jobId) {
+      setTowState('idle');
+      setActiveTowJob(null);
+      setActiveVialAssist(null);
+      return;
+    }
+
+    try {
+      // 2. Update asistencias_viales to cancelado
+      await supabase
+        .from('asistencias_viales')
+        .update({ estado: 'cancelado' })
+        .eq('id', jobId);
+      
+      setTowState('idle');
+      setActiveTowJob(null);
+      setActiveVialAssist(null);
+      showMaterialAlert('🚜 Traslado Cancelado', 'El servicio de asistencia vial de grúa ha sido cancelado con éxito.');
+    } catch (err) {
+      console.error("Error canceling tow request:", err);
+      // fallback clear
+      setTowState('idle');
+      setActiveTowJob(null);
+      setActiveVialAssist(null);
     }
   };
 
@@ -3176,6 +4499,8 @@ export default function App() {
 
           if (rpcError) throw rpcError;
 
+          
+
           // Sincronización en tiempo real posterior en el frontend de saldos actualizados
           if (sessionUser?.id) {
             const { data: lawyerAbg } = await supabase
@@ -3260,7 +4585,7 @@ export default function App() {
     );
   };
 
-  // Driver accepts towing dispatch (DB Synced)
+// Driver accepts towing dispatch (DB Synced)
   const handleDriverAcceptJob = async () => {
     if (driverDebt >= 20.00) {
       showMaterialAlert('🔴 Operación Bloqueada', 'Debes pagar tus comisiones vencidas ($20 limit) a la plataforma antes de recibir nuevos despachos.');
@@ -3269,86 +4594,108 @@ export default function App() {
 
     if (!activeTowJob) return;
 
-    try {
-      // Find current gruero row first
-      let grueroId = null;
+    let realLat = towDriverCoords.lat;
+    let realLng = towDriverCoords.lng;
+
+    // FORZAR PERMISO GPS GRUERO: Si está en 0, lo pedimos obligatoriamente al hacer click
+    if (realLat === 0 || realLng === 0) {
+      setIsAuthLoading(true);
       try {
-        const { data: qGruero } = await supabase
-          .from('grueros')
-          .select('id')
-          .eq('auth_id', sessionUser?.id)
-          .maybeSingle();
-        if (qGruero) {
-          grueroId = qGruero.id;
-        }
-      } catch (err) {
-        console.error("Error querying gruero uuid:", err);
+        const pos: any = await new Promise((resolve, reject) => {
+          navigator.geolocation.getCurrentPosition(resolve, reject, { enableHighAccuracy: true, timeout: 15000, maximumAge: 0 });
+        });
+        realLat = pos.coords.latitude;
+        realLng = pos.coords.longitude;
+        setTowDriverCoords({ lat: realLat, lng: realLng });
+        setCraneUnitState({ lat_actual: realLat, lng_actual: realLng });
+      } catch (err: any) {
+        setIsAuthLoading(false);
+        let msg = "Asegúrate de tener el GPS del celular encendido.";
+        if (err.code === 1) msg = "Denegaste el permiso de ubicación al navegador.";
+        if (err.code === 2) msg = "No hay señal de satélite física en tu posición.";
+        if (err.code === 3) msg = "El GPS tardó demasiado en responder.";
+        showMaterialAlert('📡 GPS Requerido', `No podemos iniciar la ruta sin tu ubicación 100% real.\n\nDetalle: ${msg}`);
+        return;
+      }
+      setIsAuthLoading(false);
+    }
+
+    const acceptedJobId = activeTowJob.id;
+
+    // 1. Transición Inmediata UI
+    setActiveTowJob(prev => prev ? {
+      ...prev,
+      status: 'en_route',
+      driverName: driverProfile.name || 'Operador Asignado',
+      driverPhone: driverProfile.phone || 'No phone'
+    } : null);
+    setTowState('dispatched');
+
+    try {
+      const { data: qGruero } = await supabase.from('grueros').select('id').eq('auth_id', sessionUser.id).maybeSingle();
+      const actualGrueroId = qGruero?.id;
+      
+      if (!actualGrueroId) {
+        setTowState('idle'); 
+        return;
       }
 
-      // Update asistencias_viales to 'activa'
+      // CÁLCULO MATEMÁTICO REAL: Ya tenemos el GPS de ambos, calculamos la distancia y tarifa final.
+      const distanceKm = calculateDistanceInKm(realLat, realLng, activeTowJob.latitude, activeTowJob.longitude);
+      const distanceMeters = Math.round(distanceKm * 1000);
+      const baseFee = tariffs.grua?.tarifa_base ?? 30.00;
+      const kmRate = tariffs.grua?.precio_por_km ?? 4.50;
+      const calculatedPrice = baseFee + (distanceKm * kmRate);
+
+      // 3. Conectar al ciudadano y gruero y actualizar precios reales en BD
       await supabase
         .from('asistencias_viales')
         .update({
           estado: 'activa',
-          gruero_id: grueroId || null
+          gruero_id: actualGrueroId,
+          distancia_metros: distanceMeters,
+          costo_total: calculatedPrice
         })
-        .eq('id', activeTowJob.id);
+        .eq('id', acceptedJobId);
 
-      // Query or create units of this gruero
-      if (grueroId) {
-        const { data: craneUnit } = await supabase
-          .from('unidades_grua')
-          .select('*')
-          .eq('gruero_id', grueroId)
-          .maybeSingle();
-        
-        if (craneUnit) {
-          setCraneUnitState({
-            lat_actual: Number(craneUnit.lat_actual) || 10.4900,
-            lng_actual: Number(craneUnit.lng_actual) || -66.9100
-          });
-        } else {
-          const newUnit = {
-            gruero_id: grueroId,
-            estado: 'en_ruta',
-            lat_actual: 10.4900,
-            lng_actual: -66.9100
-          };
-          await supabase.from('unidades_grua').insert(newUnit);
-          setCraneUnitState({ lat_actual: 10.4900, lng_actual: -66.9100 });
-        }
-      }
+      // Actualizar el estado local para que el mapa trace bien
+      setActiveTowJob(prev => prev ? { ...prev, distance: distanceMeters, price: calculatedPrice } : null);
 
-      setActiveTowJob({
-        ...activeTowJob,
-        status: 'en_route',
-        driverName: driverProfile.name || 'Operador Asignado',
-        driverPhone: driverProfile.phone || 'No phone'
-      });
-      setTowState('dispatched');
-
-      // Prepend or add first driver message with logged-in driver's actual registered name via DB Insert
-      const initialDriverMsgText = `🚨 Hola, soy el operador de grúa ${driverProfile.name || 'Asignado'}. Ya voy en ruta hacia tu localización en tiempo real con mi remolque. Puedes escribirme por aquí.`;
+      // 4. Crear mensaje
+      const timeStr = new Date().toLocaleTimeString('es-VE', { hour: '2-digit', minute: '2-digit', hour12: false });
+      const initialDriverMsgText = `🚨 Unidad asignada y en ruta. El operador está rastreando tu ubicación GPS en tiempo real. Utiliza este chat para indicaciones adicionales.`;
       
-      try {
-        await supabase
-          .from('mensajes_viales')
-          .insert({
-            asistencia_id: activeTowJob.id,
-            remitente: 'driver',
-            mensaje: initialDriverMsgText
-          });
-      } catch (e) {
-        console.error("Error inserting initial driver message in mensajes_viales:", e);
-      }
+      const initialMsg = { sender: 'driver' as const, text: initialDriverMsgText, time: timeStr };
+      setTowMessages(prev => [...prev, initialMsg]);
 
-      triggerPush('🚜 Despacho Vial Aceptado', 'El operador ha iniciado tránsito hacia las coordenadas de tu GPS.');
-    } catch (e) {
-      console.error("Error accepting dispatch in DB:", e);
+      try {
+        await supabase.channel(`room-tow-${acceptedJobId}`).send({
+          type: 'broadcast', event: 'shout', payload: { msg: initialMsg }
+        });
+      } catch {}
+
+      await supabase.from('mensajes_viales').insert({
+        asistencia_id: acceptedJobId, remitente: 'driver', mensaje: initialDriverMsgText
+      });
+
+      // 5. Inyectar coordenadas en unidades_grua para destrabar la app del Ciudadano
+      const { data: craneUnit } = await supabase.from('unidades_grua').select('id').eq('gruero_id', actualGrueroId).maybeSingle();
+
+      if (craneUnit) {
+        await supabase.from('unidades_grua').update({ lat_actual: realLat, lng_actual: realLng, estado: 'en_ruta' }).eq('id', craneUnit.id);
+      } else {
+        await supabase.from('unidades_grua').insert({ gruero_id: actualGrueroId, estado: 'en_ruta', lat_actual: realLat, lng_actual: realLng });
+      }
+      setCraneUnitState({ lat_actual: realLat, lng_actual: realLng });
+
+      triggerPush('🚜 Despacho Vial Aceptado', 'Ruta GPS iniciada con éxito hacia el asegurado.');
+
+    } catch (err) {
+      console.error("Error crítico conectando el viaje:", err);
+      setTowState('idle'); 
     }
   };
-
-  // Driver/citizen sends chat (synchronized in DB 'mensajes_viales' table)
+  // Driver/citizen sends chat (synchronized via real-time Broadcast & DB fallback)
   const handleSendTowMessage = async (senderRole: 'driver' | 'citizen') => {
     const text = senderRole === 'driver' ? driverChatInput.trim() : towChatInput.trim();
     if (!text) return;
@@ -3363,6 +4710,31 @@ export default function App() {
       setTowChatInput('');
     }
 
+    const timeStr = new Date().toLocaleTimeString('es-VE', { hour: '2-digit', minute: '2-digit', hour12: false });
+    const newMsg = {
+      sender: senderRole,
+      text: text,
+      time: timeStr
+    };
+
+    // 1. Add locally
+    setTowMessages(prev => {
+      if (prev.some(m => m.text === text && m.sender === senderRole)) return prev;
+      return [...prev, newMsg];
+    });
+
+    // 2. Broadcast via Supabase websocket room
+    try {
+      await supabase.channel(`room-tow-${currentJob.id}`).send({
+        type: 'broadcast',
+        event: 'shout',
+        payload: { msg: newMsg }
+      });
+    } catch (broadcastErr) {
+      console.error("Error broadcasting tow chat message:", broadcastErr);
+    }
+
+    // 3. Fallback database insert (ignores relation errors gracefully)
     try {
       await supabase
         .from('mensajes_viales')
@@ -3372,9 +4744,11 @@ export default function App() {
           mensaje: text
         });
     } catch (e) {
-      console.error("Error sending synchronized tow chat message to DB:", e);
+      console.log("Error sending synchronized tow chat message to DB (fallback):", e);
     }
   };
+
+
 
   // Direct sync and simulation send actions for Ambulance and Doctor
   const handleSendAmbulanceMessage = async (sender: 'user' | 'driver' | 'bot', textOverride?: string) => {
@@ -3475,32 +4849,8 @@ export default function App() {
     }
   };
 
-  const handleSendAmbulanceAI = async () => {
-    const text = ambulanceAgentInput.trim();
-    if (!text) return;
-    const timeStr = new Date().toLocaleTimeString('es-VE', { hour: '2-digit', minute: '2-digit', hour12: false });
-    const newMsgs = [...ambulanceAgentMessages, { sender: 'user' as const, text, time: timeStr }];
-    setAmbulanceAgentMessages(newMsgs);
-    setAmbulanceAgentInput('');
-    try {
-      const targetUrl = 'https://panel1.quickai.agency/webhook/abogadoya-agente';
-      const res = await fetch(targetUrl, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Accept': 'application/json'
-        },
-        body: JSON.stringify({ text })
-      });
-      const data = await res.json();
-      const reply = data.response || data.output || data.text || "Asistente AI de Trauma procesando...";
-      setAmbulanceAgentMessages(m => [...m, { sender: 'bot', text: reply, time: timeStr }]);
-    } catch(err) {
-      setAmbulanceAgentMessages(m => [...m, { sender: 'bot', text: "🩺 *Análisis de Emergencia AI:* Se recomienda inmovilización cervical, control manual de hemorragias externas con vendaje compresivo, y mantener al asegurado en posición decúbito supino.", time: timeStr }]);
-    }
-  };
-
-  const handleSendMedicAI = async () => {
+  
+const handleSendMedicAI = async () => {
     const text = medicAgentInput.trim();
     if (!text) return;
     const timeStr = new Date().toLocaleTimeString('es-VE', { hour: '2-digit', minute: '2-digit', hour12: false });
@@ -3515,22 +4865,41 @@ export default function App() {
           'Content-Type': 'application/json',
           'Accept': 'application/json'
         },
-        body: JSON.stringify({ text })
+        body: JSON.stringify({ 
+          text: text,
+          message: text,
+          mensaje: text,
+          prompt: text,
+          input: text,
+          chatInput: text,
+          phone: activeDevice === 'citizen' ? citizenProfile.phone : medicProfile.phone,
+          name: activeDevice === 'citizen' ? citizenProfile.name : medicProfile.name
+        })
       });
-      const data = await res.json();
-      const reply = data.response || data.output || data.text || "Asistente Clínico AI procesando...";
+      
+      const resText = await res.text();
+      let reply = "Asistente Clínico AI procesando...";
+      try {
+         const data = JSON.parse(resText);
+         reply = data.response || data.output || data.text || resText;
+      } catch(e) {
+         reply = resText; // Si n8n devuelve texto plano, lo asimila sin crashear.
+      }
       setMedicAgentMessages(m => [...m, { sender: 'bot', text: reply, time: timeStr }]);
     } catch(err) {
-      setMedicAgentMessages(m => [...m, { sender: 'bot', text: "🩺 *Triage AI Clínico:* Basado en los síntomas, se descarta síndrome coronario agudo y se sugiere reposo asistido, hidratación electrolítica oral, y chequeo de tensión arterial cada 8 horas.", time: timeStr }]);
+      setMedicAgentMessages(m => [...m, { sender: 'bot', text: "🩺 *Error de Conexión:* No pude enlazar con el servidor central de AI. Verifica tu red.", time: timeStr }]);
     }
   };
 
+  // Complete tow job & updates commission debt of tow driver (DB Synced & Real Transactions)
   // Complete tow job & updates commission debt of tow driver (DB Synced & Real Transactions)
   const handleFinalizeTowJob = async () => {
     if (!activeTowJob) return;
 
     try {
-      // 1. Fetch assistance details from asistencias_viales to get the real citizen_id
+      setIsAuthLoading(true);
+
+      // 1. Obtener detalles de la asistencia
       const { data: assist } = await supabase
         .from('asistencias_viales')
         .select('*')
@@ -3540,10 +4909,11 @@ export default function App() {
       const citizenId = assist?.ciudadano_id;
       if (!citizenId) {
         showMaterialAlert('⚠️ Error de Transacción', 'No se ha encontrado el identificador del ciudadano asociado a este servicio.');
+        setIsAuthLoading(false);
         return;
       }
 
-      // 2. Fetch the citizen's real selected vehicle from Supabase
+      // 2. Obtener tipo de vehículo
       const { data: citizenUser } = await supabase
         .from('usuarios')
         .select('tipo_vehiculo, vehicle_selection')
@@ -3552,209 +4922,87 @@ export default function App() {
 
       const vType = citizenUser?.vehicle_selection || citizenUser?.tipo_vehiculo || 'coche';
 
-      // 3. Calculate distance price dynamically using distance
-      const distanceInKm = activeTowJob.distance / 1000 || 3.45;
-      const baseFee = vType === 'coche' ? 20.00 : 12.00;
-      const kmRate = vType === 'coche' ? 3.50 : 2.00;
-      const calculatedPrice = baseFee + distanceInKm * kmRate;
+      // 3. Matemática Real: Calcular distancia y precio
+      const distanceInKm = activeTowJob.distance / 1000 || 5.40;
+      const baseFee = tariffs.grua?.tarifa_base ?? (vType === 'coche' ? 30.00 : 20.00);
+      const kmRate = tariffs.grua?.precio_por_km ?? (vType === 'coche' ? 4.50 : 3.00);
+      const calculatedPrice = baseFee + (distanceInKm * kmRate);
 
-      const driverReceives = calculatedPrice * 0.80;
-      const platformFee = calculatedPrice * 0.20;
+      // MATEMÁTICA NUEVA: 10% Comisión Plataforma, 90% para el Gruero
+      const platformFee = calculatedPrice * 0.10;
+      const driverReceives = calculatedPrice - platformFee;
 
-      showMaterialConfirm(
-        '🚜 Finalizar Remolque',
-        `¿Confirmas el traslado exitoso del siniestro del asegurado?\n\n` +
-        `• Perfil vehículo leído: ${vType === 'coche' ? '🚗 Coche' : '🏍️ Moto'}\n` +
-        `• Distancia recorrida: ${distanceInKm.toFixed(2)} Km\n` +
-        `• Tarifa total calculada: $${calculatedPrice.toFixed(2)} USD\n` +
-        `• Pago neto conductor: $${driverReceives.toFixed(2)} USD (80%)\n` +
-        `• Comisión plataforma: $${platformFee.toFixed(2)} USD (20%)`,
-        async () => {
-          try {
-            setIsAuthLoading(true);
+      // A. Cerrar viaje en la BD
+      await supabase
+        .from('asistencias_viales')
+        .update({ estado: 'completado' })
+        .eq('id', activeTowJob.id);
 
-            // Update asistencias_viales table state in DB
-            await supabase
-              .from('asistencias_viales')
-              .update({ estado: 'completado' })
-              .eq('id', activeTowJob.id);
-
-            // B. Debit total amount from saldos
-            const { data: balanceRow } = await supabase
-              .from('saldos')
-              .select('creditos_disponibles')
-              .eq('usuario_id', citizenId)
-              .maybeSingle();
-
-            const newClientBal = Math.max(0, (balanceRow?.creditos_disponibles || 35.0) - calculatedPrice);
-            await supabase
-              .from('saldos')
-              .update({ creditos_disponibles: newClientBal })
-              .eq('usuario_id', citizenId);
-
-            setCitizenBalance(newClientBal);
-
-            // C. Add 80% to saldos_grueros
-            const { data: profBalRow } = await supabase
-              .from('saldos_grueros')
-              .select('balance')
-              .eq('user_id', sessionUser?.id)
-              .maybeSingle();
-
-            const newProfBal = (profBalRow?.balance || 0.00) + driverReceives;
-            await supabase
-              .from('saldos_grueros')
-              .upsert({
-                user_id: sessionUser?.id,
-                balance: newProfBal,
-                updated_at: new Date().toISOString()
-              }, { onConflict: 'user_id' });
-
-            setDriverBalance(newProfBal);
-
-            // D. Insert record into historial_comisiones
-            await supabase.from('historial_comisiones').insert({
-              servicio_id: activeTowJob.id,
-              tipo_servicio: 'grua',
-              proveedor_id: sessionUser?.id,
-              cliente_id: citizenId,
-              monto_cobrado: calculatedPrice,
-              ganancia_profesional: driverReceives,
-              comision_secureflow: platformFee
-            });
-
-            setTowState('idle');
-            setActiveTowJob(null);
-            showMaterialAlert('✅ Concluido', `Asistencia vial finalizada de forma real. Se cargaron $${calculatedPrice.toFixed(2)} USD y tus fondos de $${driverReceives.toFixed(2)} USD se acreditaron de inmediato.`);
-          } catch (e) {
-            console.error("Error running finalize tow database transaction processes:", e);
-            showMaterialAlert('❌ Error Grave', 'Error procesando transacciones reales en Supabase.');
-          } finally {
-            setIsAuthLoading(false);
-          }
-        }
-      );
-    } catch (err) {
-      console.error(err);
-      showMaterialAlert('❌ Error de Lectura', 'No se pudo conectar con la base de datos para calcular la tarifa.');
-    }
-  };
-
-  // Complete ambulance job & updates paramedic balance (DB Synced & Real Transactions)
-  const handleFinalizeAmbulanceJob = async () => {
-    if (!activeAmbulanceJob) return;
-
-    try {
-      // 1. Fetch emergency details from emergencias_activas to get the real citizen_id
-      const { data: emer } = await supabase
-        .from('emergencias_activas')
-        .select('*')
-        .eq('id', activeAmbulanceJob.id)
+      // B. Debitar saldo del ciudadano
+      const { data: balanceRow } = await supabase
+        .from('saldos')
+        .select('creditos_disponibles')
+        .eq('usuario_id', citizenId)
         .maybeSingle();
 
-      const citizenId = emer?.ciudadano_id;
-      if (!citizenId) {
-        showMaterialAlert('⚠️ Error de Transacción', 'No se ha encontrado el identificador del ciudadano asociado a este servicio.');
-        return;
+      const newClientBal = Math.max(0, (balanceRow?.creditos_disponibles || 0) - calculatedPrice);
+      await supabase
+        .from('saldos')
+        .update({ creditos_disponibles: newClientBal })
+        .eq('usuario_id', citizenId);
+
+      // C. Acreditar saldo al gruero
+      const actualGrueroId = assist?.gruero_id || activeTowJob.gruero_id;
+      
+      if (actualGrueroId || sessionUser?.id) {
+        const searchCol = actualGrueroId ? 'gruero_id' : 'user_id';
+        const searchVal = actualGrueroId || sessionUser?.id;
+        
+        const { data: profRow } = await supabase
+          .from('saldos_grueros')
+          .select('balance')
+          .eq(searchCol, searchVal)
+          .maybeSingle();
+
+        const newProfBal = (profRow?.balance || 0.00) + driverReceives;
+
+        await supabase
+          .from('saldos_grueros')
+          .upsert({
+            [searchCol]: searchVal,
+            balance: newProfBal,
+            updated_at: new Date().toISOString()
+          }, { onConflict: searchCol });
+
+        setDriverBalance(newProfBal);
       }
 
-      // 2. Fetch the citizen's real selected vehicle from Supabase
-      const { data: citizenUser } = await supabase
-        .from('usuarios')
-        .select('tipo_vehiculo, vehicle_selection')
-        .eq('auth_id', citizenId)
-        .maybeSingle();
+      // D. Historial de comisiones
+      await supabase.from('historial_comisiones').insert({
+        servicio_id: activeTowJob.id,
+        tipo_servicio: 'grua',
+        profesional_id: sessionUser?.id,
+        cliente_id: citizenId,
+        monto_cobrado: calculatedPrice,
+        ganancia_profesional: driverReceives,
+        comision_secureflow: platformFee
+      });
 
-      const vType = citizenUser?.vehicle_selection || citizenUser?.tipo_vehiculo || 'coche';
+      // Limpiar pantallas y volver al inicio
+      setTowState('idle');
+      setActiveTowJob(null);
+      setActiveVialAssist(null);
+      showMaterialAlert('✅ Concluido', `Servicio finalizado exitosamente. Se descontaron $${calculatedPrice.toFixed(2)} al ciudadano. Tu ganancia neta es de $${driverReceives.toFixed(2)} USD (90%).`);
 
-      // 3. Calculate distance price dynamically using distance of dispatch
-      const distanceInKm = activeAmbulanceJob.distance / 1000 || 2.1;
-      const baseFee = vType === 'coche' ? 30.00 : 20.00;
-      const kmRate = vType === 'coche' ? 5.00 : 3.00;
-      const calculatedPrice = baseFee + distanceInKm * kmRate;
-
-      const driverReceives = calculatedPrice * 0.80;
-      const platformFee = calculatedPrice * 0.20;
-
-      showMaterialConfirm(
-        '🚑 Finalizar Despacho Clínico',
-        `¿Confirmas la entrega exitosa del asegurado en la sala clínica?\n\n` +
-        `• Perfil vehículo leído: ${vType === 'coche' ? '🚗 Coche' : '🏍️ Moto'}\n` +
-        `• Distancia recorrida: ${distanceInKm.toFixed(2)} Km\n` +
-        `• Tarifa total calculada: $${calculatedPrice.toFixed(2)} USD\n` +
-        `• Pago neto paramédico: $${driverReceives.toFixed(2)} USD (80%)\n` +
-        `• Comisión plataforma: $${platformFee.toFixed(2)} USD (20%)`,
-        async () => {
-          try {
-            setIsAuthLoading(true);
-
-            // A. Update emergency state in DB
-            const { error: ambUpdateErr } = await supabase
-              .from('emergencias_activas')
-              .update({ estado: 'finalizada' })
-              .eq('id', activeAmbulanceJob.id);
-            if (ambUpdateErr) throw ambUpdateErr;
-
-            // B. Debit total amount from saldos
-            const { data: balanceRow } = await supabase
-              .from('saldos')
-              .select('creditos_disponibles')
-              .eq('usuario_id', citizenId)
-              .maybeSingle();
-
-            const newClientBal = Math.max(0, (balanceRow?.creditos_disponibles || 35.0) - calculatedPrice);
-            await supabase
-              .from('saldos')
-              .update({ creditos_disponibles: newClientBal })
-              .eq('usuario_id', citizenId);
-
-            setCitizenBalance(newClientBal);
-
-            // C. Add 80% to saldos_ambulancias
-            const { data: profBalRow } = await supabase
-              .from('saldos_ambulancias')
-              .select('balance')
-              .eq('user_id', sessionUser?.id)
-              .maybeSingle();
-
-            const newProfBal = (profBalRow?.balance || 0.00) + driverReceives;
-            await supabase
-              .from('saldos_ambulancias')
-              .upsert({
-                user_id: sessionUser?.id,
-                balance: newProfBal,
-                updated_at: new Date().toISOString()
-              }, { onConflict: 'user_id' });
-
-            setAmbulanceBalanceClean(newProfBal);
-
-            // D. Insert record into historial_comisiones
-            await supabase.from('historial_comisiones').insert({
-              servicio_id: activeAmbulanceJob.id,
-              tipo_servicio: 'ambulancia',
-              proveedor_id: sessionUser?.id,
-              cliente_id: citizenId,
-              monto_cobrado: calculatedPrice,
-              ganancia_profesional: driverReceives,
-              comision_secureflow: platformFee
-            });
-
-            setAmbulanceState('idle');
-            setActiveAmbulanceJob(null);
-            showMaterialAlert('✅ Concluido', `Traslado completado de forma real. Se cargaron $${calculatedPrice.toFixed(2)} USD de la cuenta de seguro del afiliado.`);
-          } catch (e) {
-            console.error("Error running finalize ambulance database processes:", e);
-            showMaterialAlert('❌ Error Grave', 'Error procesando transacciones reales en Supabase.');
-          } finally {
-            setIsAuthLoading(false);
-          }
-        }
-      );
-    } catch (err) {
-      console.error(err);
-      showMaterialAlert('❌ Error de Lectura', 'No se pudo conectar con la base de datos para calcular la tarifa.');
+    } catch (e) {
+      console.error("Error al finalizar viaje:", e);
+      showMaterialAlert('❌ Error Grave', 'Error procesando la transacción de cierre.');
+    } finally {
+      setIsAuthLoading(false);
     }
   };
+
+  
 
   // Settle driver debt
   const handlePayDriverDebt = () => {
@@ -3793,18 +5041,17 @@ export default function App() {
   return (
     <div className="min-h-screen bg-[#0d0f14] text-slate-100 flex flex-col md:flex-row items-center justify-center font-sans select-none overflow-x-hidden md:p-4">
       
-      {/* GLOBAL FIXED SUPERIOR LOGOUT BUTTON (ANTI-BLACKOUT RED DE SEGURIDAD) */}
+     {/* GLOBAL FIXED SUPERIOR LOGOUT BUTTON (ANTI-BLACKOUT RED DE SEGURIDAD) */}
       {sessionUser && activeDevice !== 'landing' && (
         <button
           onClick={handleSignOut}
-          className="fixed top-4 right-4 z-[99999] bg-rose-600 hover:bg-rose-700 active:scale-95 text-white text-xs font-black tracking-widest px-4 py-3 rounded-2xl shadow-[0_0_30px_rgba(225,29,72,0.4)] border border-rose-500/30 transition-all flex items-center gap-2 cursor-pointer uppercase select-none"
+          className="fixed top-4 right-4 z-[99999] bg-rose-600/90 hover:bg-rose-700 active:scale-95 text-white text-[10px] font-bold px-3 py-1.5 rounded-full shadow-lg border border-rose-500/30 transition-all flex items-center gap-1.5 cursor-pointer uppercase select-none backdrop-blur-sm"
           title="Forzar Cierre de Sesión"
         >
-          <LogOut className="w-4 h-4 text-rose-100 animate-pulse" />
-          <span>Cerrar Sesión</span>
+          <LogOut className="w-3 h-3 text-rose-100" />
+          <span>Salir</span>
         </button>
       )}
-      
       {/* Active Floating Simulated Push Notification banner */}
       {systemNotification && (
         <div className="fixed top-4 left-4 right-4 md:left-auto md:right-4 md:w-[360px] bg-[#1E212B]/95 border-l-4 border-blue-500 p-4 rounded-xl shadow-2xl z-50 flex items-start gap-3 backdrop-blur-md animate-bounce">
@@ -3873,14 +5120,6 @@ export default function App() {
                     <SecureFlowLogoCustom className="w-24 h-24 mx-auto" />
                     <h2 className="text-2xl font-black mt-4 tracking-tight text-white uppercase bg-gradient-to-r from-blue-400 via-sky-200 to-cyan-400 bg-clip-text text-transparent">SecureFlow</h2>
                     <p className="text-[10px] text-slate-400 uppercase tracking-widest font-bold tracking-widest">Ecosistema Integral de Defensa</p>
-                  </div>
-
-                  <div className="mt-5 p-4 bg-immersive-frame rounded-2xl border border-white/5 text-center">
-                    <span className="text-[9px] bg-amber-500/25 text-amber-400 px-2 py-0.5 rounded-md font-bold uppercase tracking-wider">Lanzamiento 2026</span>
-                    <h3 className="text-sm font-bold text-white mt-2">Protección Vial e Insurtech en un toque</h3>
-                    <p className="text-[11px] text-slate-400 mt-1 leading-relaxed">
-                      Conecta directo con peritos viales, grúas más cercanas por geocerca y defensa de guardia.
-                    </p>
                   </div>
 
                   {/* Android Native md3 input fields simulator selection */}
@@ -4009,6 +5248,32 @@ export default function App() {
                                 placeholder="Ej: 584241234567"
                                 className="w-full bg-immersive-dark border border-white/5 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-blue-500"
                               />
+                            </div>
+
+                            <div>
+                              <label className="text-[10px] text-slate-400 font-bold uppercase block mb-1">Ciudad / País de Operación</label>
+                              <select 
+                                value={selectedCity}
+                                onChange={(e) => setSelectedCity(e.target.value)}
+                                className="w-full bg-immersive-dark border border-white/5 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-blue-500 bg-black/40"
+                              >
+                                <option value="Caracas, Venezuela">Caracas, Venezuela</option>
+                                <option value="Bogotá, Colombia">Bogotá, Colombia</option>
+                                <option value="Lima, Perú">Lima, Perú</option>
+                                <option value="Santiago, Chile">Santiago, Chile</option>
+                                <option value="Buenos Aires, Argentina">Buenos Aires, Argentina</option>
+                                <option value="Ciudad de México, México">Ciudad de México, México</option>
+                                <option value="Miami, USA">Miami, USA</option>
+                                <option value="Ciudad de Panamá, Panamá">Ciudad de Panamá, Panamá</option>
+                                <option value="San José, Costa Rica">San José, Costa Rica</option>
+                                <option value="Guayaquil, Ecuador">Guayaquil, Ecuador</option>
+                                <option value="Asunción, Paraguay">Asunción, Paraguay</option>
+                                <option value="Montevideo, Uruguay">Montevideo, Uruguay</option>
+                                <option value="Madrid, España">Madrid, España</option>
+                                <option value="Barcelona, España">Barcelona, España</option>
+                                <option value="Valencia, España">Valencia, España</option>
+                                <option value="Canarias, España">Canarias, España</option>
+                              </select>
                             </div>
 
                             <div>
@@ -4291,8 +5556,159 @@ export default function App() {
               )}
 
               {/* ---------------- SCREEN 2: CITIZEN APP ENGINE ---------------- */}
-              {activeDevice === 'citizen' && sessionUser && (
-                <div className="flex-1 flex flex-col justify-stretch">
+              {activeDevice === 'citizen' && sessionUser && (() => {
+                const resolvedAssist = activeVialAssist || activeTowJob;
+                let activeAssistance = null;
+                if (resolvedAssist) {
+                  const rawState = resolvedAssist.estado || resolvedAssist.status || (towState === 'idle' ? null : towState);
+                  if (rawState && rawState !== 'completed' && rawState !== 'cancelado' && rawState !== 'completado' && rawState !== 'idle') {
+                    let est = 'pendiente';
+                    if (
+                      rawState === 'activa' ||
+                      rawState === 'en_progreso' ||
+                      rawState === 'active' ||
+                      rawState === 'en_route' ||
+                      rawState === 'dispatched' ||
+                      rawState === 'aceptado'
+                    ) {
+                      est = 'activa';
+                    } else if (
+                      rawState === 'pendiente' ||
+                      rawState === 'pending' ||
+                      rawState === 'proposed'
+                    ) {
+                      est = 'pendiente';
+                    }
+
+                    activeAssistance = {
+                      id: resolvedAssist.id,
+                      estado: est,
+                      driverName: resolvedAssist.driverName || 'Operador Asignado',
+                      driverPhone: resolvedAssist.driverPhone,
+                      vehiclePlate: activeTowJob?.vehiclePlate || resolvedAssist.vehiclePlate || 'Cargando...',
+                      price: resolvedAssist.price || resolvedAssist.costo_total,
+                      distance: resolvedAssist.distance || resolvedAssist.distancia_metros,
+                      latitude: resolvedAssist.latitude || resolvedAssist.ubicacion_origen_lat,
+                      longitude: resolvedAssist.longitude || resolvedAssist.ubicacion_origen_lng
+                    };
+                  }
+                }
+
+                if (activeAssistance && activeAssistance.estado === 'pendiente') {
+                  return (
+                    <CitizenPendingTowLoader 
+                      assistId={activeAssistance.id}
+                      onActive={handleOnTowRequestActivated}
+                      onCancel={handleCancelTowRequest}
+                    />
+                  );
+                }
+
+                if (activeAssistance && activeAssistance.estado === 'activa') {
+                  return (
+                    <div className="flex-1 flex flex-col relative bg-slate-950 overflow-hidden animate-fade-in min-h-[500px]" id="citizen-active-tracking-fullscreen">
+                      {/* MAPA FORZADO: Rompe el bucle de sincronización y muestra la ruta de inmediato */}
+                      <div className="absolute inset-0 z-0">
+                        <RoadsideMap
+                          driverLat={craneUnitState?.lat_actual ? craneUnitState.lat_actual : (activeAssistance?.latitude || citizenCoords.lat) + 0.0005}
+                          driverLng={craneUnitState?.lng_actual ? craneUnitState.lng_actual : (activeAssistance?.longitude || citizenCoords.lng) + 0.0005}
+                          citizenLat={activeAssistance?.latitude || citizenCoords.lat}
+                          citizenLng={activeAssistance?.longitude || citizenCoords.lng}
+                        />
+                      </div>
+
+                      <div className="absolute inset-x-0 bottom-0 z-10 p-3 bg-slate-950/95 border-t border-indigo-500/10 pointer-events-auto flex flex-col max-h-[60%] overflow-y-auto" id="unified-tracking-overlay">
+                        <div className="flex justify-between items-center mb-2">
+                          <div className="text-left">
+                            <span className="text-[9px] font-bold text-yellow-500 font-mono tracking-wider uppercase animate-pulse block">🚜 SERVICIO DE REMOLQUE ACTIVO</span>
+                            <h3 className="text-xs font-black text-white mt-0.5">Operador: {activeAssistance.driverName}</h3>
+                            <span className="text-[9px] text-slate-400 font-mono">Placa: {activeAssistance.vehiclePlate} | ETA: {Math.ceil((activeAssistance.distance || 5400) / 150) || 5} min</span>
+                          </div>
+                          <div className="text-right flex flex-col items-end">
+                            <span className="text-[11px] font-black text-red-400 font-mono">
+                              Total: $ {(activeAssistance.price || 30.00).toFixed(2)}
+                            </span>
+                            <span className="text-[8px] text-slate-500 font-mono">Debitado al concluir</span>
+                          </div>
+                        </div>
+
+                        {isTowDailyCoActive && (
+                          <div className="w-full h-32 bg-slate-900 border border-indigo-500/20 rounded-xl relative overflow-hidden mb-2">
+                            <iframe 
+                              src={towDailyCoUrl || activeVialAssist?.sala_webrtc_url || ("https://iframe.daily.co/secureflow-tow-" + activeAssistance.id)}
+                              allow="camera; microphone; fullscreen"
+                              className="w-full h-full border-0 absolute inset-0"
+                              title="Daily.co Tow Companion"
+                            />
+                          </div>
+                        )}
+
+                        <div className="bg-slate-900/60 border border-white/5 rounded-xl p-2 max-h-[140px] overflow-y-auto mb-2 scrollbar-thin animate-fade-in">
+                          <span className="text-[8px] text-slate-500 block text-center font-mono uppercase mb-1.5 font-bold">Canal de Chat con Operador</span>
+                          {towMessages.length === 0 ? (
+                            <p className="text-[9.5px] text-slate-500 text-center py-2 font-mono">No hay mensajes en sala</p>
+                          ) : (
+                            <div className="space-y-1.5 animate-fade-in">
+                              {towMessages.map((tmsg, idx) => (
+                                <div key={idx} className={`flex flex-col ${tmsg.sender === 'citizen' ? 'items-end' : 'items-start'}`}>
+                                  <div className={`px-2.5 py-1.5 rounded-xl text-[10px] max-w-[85%] leading-relaxed ${tmsg.sender === 'citizen' ? 'bg-indigo-650 text-white' : 'bg-slate-950 border border-yellow-500/10 text-yellow-105'}`}>
+                                    <p>{tmsg.text}</p>
+                                  </div>
+                                </div>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+
+                        <div className="flex gap-1.5 mb-1.5">
+                          <input 
+                            type="text"
+                            value={towChatInput}
+                            onChange={(e) => setTowChatInput(e.target.value)}
+                            onKeyDown={(e) => {
+                              if (e.key === 'Enter') {
+                                handleSendTowMessage('citizen');
+                              }
+                            }}
+                            placeholder="Escribe al gruero..."
+                            className="flex-1 bg-slate-900 border border-slate-800 rounded-xl px-2.5 py-1.5 text-[10.5px] text-white focus:outline-none"
+                          />
+                          <button 
+                            onClick={() => handleSendTowMessage('citizen')}
+                            className="bg-indigo-650 hover:bg-indigo-600 text-white px-3 py-1.5 rounded-xl text-[10px] font-bold uppercase transition-all"
+                          >
+                            Enviar
+                          </button>
+                        </div>
+
+                        <div className="flex gap-2">
+                          <button 
+                            onClick={() => {
+                              showMaterialAlert('Cancelando Asistencia', 'Procediendo a cancelar despacho vial...');
+                              handleCancelTowRequest();
+                            }}
+                            className="bg-red-950/60 border border-red-500/20 hover:bg-red-900/40 text-red-400 px-3 py-2 rounded-xl text-[10px] font-bold uppercase transition-all font-mono"
+                          >
+                            Cancelar
+                          </button>
+                          <button 
+                            onClick={() => {
+                              setIsTowDailyCoActive(!isTowDailyCoActive);
+                              const webrtcUrl = activeVialAssist?.sala_webrtc_url || ("https://iframe.daily.co/secureflow-tow-" + activeAssistance.id);
+                              setTowDailyCoUrl(webrtcUrl);
+                            }}
+                            className="flex-1 bg-slate-850 hover:bg-slate-755 border border-indigo-500/20 text-indigo-300 py-2 rounded-xl text-[10px] font-bold uppercase transition-all flex items-center justify-center gap-1.5"
+                          >
+                            📹 {isTowDailyCoActive ? 'Apagar Video' : 'Video WebRTC'}
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                }
+
+                return (
+                  <div className="flex-1 flex flex-col justify-stretch">
                   
                   {/* Top screen header */}
                   <div className="bg-immersive-frame border-b border-white/5 px-4 py-3 shrink-0 flex justify-between items-center z-10">
@@ -4320,254 +5736,304 @@ export default function App() {
                   {/* Tab Body Contents */}
                   <div className="flex-1 overflow-y-auto overflow-x-hidden scrollbar-thin">
                     
-                    {/* TAB CITIZEN HOME */}
-                    {citizenTab === 'home' && (
-                      <div className="p-4 space-y-4">
-                        
-                        {/* Welcome header in MD3 */}
-                        <div className="text-left mt-1.5">
-                          <h2 className="text-lg font-black text-white leading-tight">Hola, {citizenProfile.name.split(' ')[0]}</h2>
-                          <p className="text-[11px] text-slate-400 mt-0.5">En incidentes de tránsito o accidentes, mantén la calma.</p>
-                        </div>
+                  
+                     {/* TAB CITIZEN HOME */}
+                    {citizenTab === 'home' && (() => {
 
-                        {/* Interactive dynamic TOW tracking map */}
-                        {towState === 'proposed' && activeTowJob && (
-                          <div className="p-4 bg-yellow-500/10 border border-yellow-500/30 rounded-2xl space-y-3 text-center animate-pulse">
-                            <span className="text-2xl block">🚜</span>
-                            <span className="text-xs text-yellow-550 font-black block uppercase">Despachando Unidad Vial...</span>
-                            <p className="text-[10px] text-slate-300">
-                              Hemos notificado al operador de grúa en zona. Esperando confirmación de {driverProfile.name || 'Carlos Ruiz'}. Puedes activar el canal de grúa para ver status.
-                            </p>
-                            <div className="w-full bg-slate-800 rounded-full h-1 relative overflow-hidden">
-                              <div className="bg-yellow-500 h-full rounded-full animate-sweep" style={{ width: '40%' }} />
+                      // ==========================================
+                      // 1. PANTALLA DE CARGA DE AMBULANCIA AISLADA
+                      // ==========================================
+                      if (ambulanceState === 'proposed' && activeAmbulanceJob) {
+                        return (
+                          <div className="flex-1 flex flex-col justify-center items-center bg-slate-950 p-6 text-center space-y-6 animate-fade-in min-h-[500px]">
+                            <div className="w-24 h-24 bg-red-500/10 border border-red-500/30 rounded-full flex items-center justify-center animate-pulse">
+                              <span className="text-4xl">🚑</span>
                             </div>
-                          </div>
-                        )}
-
-                        {/* Interactive dynamic AMBULANCE tracking card */}
-                        {ambulanceState === 'proposed' && activeAmbulanceJob && (
-                          <div className="p-4 bg-red-500/10 border border-red-500/30 rounded-2xl space-y-3 text-center animate-pulse">
-                            <span className="text-2xl block animate-bounce">🚑</span>
-                            <span className="text-xs text-red-400 font-extrabold block uppercase">Solicitud de Ambulancia de Guardia</span>
-                            <p className="text-[10px] text-slate-300">
-                              Esperando que la unidad paramédica de resguardo SecureFlow confirme tu despacho físico. Por favor, mantente a la espera.
-                            </p>
-                            <div className="w-full bg-slate-800 rounded-full h-1 relative overflow-hidden">
+                            <div className="space-y-2">
+                              <h3 className="text-lg font-black text-red-500 uppercase tracking-wide">Despachando Ambulancia...</h3>
+                              <p className="text-xs text-slate-300 max-w-xs mx-auto leading-relaxed">
+                                Hemos notificado a la unidad paramédica más cercana. Esperando confirmación de disponibilidad para iniciar el rescate.
+                              </p>
+                            </div>
+                            <div className="w-48 bg-slate-800 rounded-full h-1.5 relative overflow-hidden">
                               <div className="bg-red-500 h-full rounded-full animate-sweep" style={{ width: '40%' }} />
                             </div>
                           </div>
-                        )}
+                        );
+                      }
 
-                        {/* Interactive dynamic MEDIC consultation card */}
-                        {medicState === 'calling' && activeMedicEmergency && (
-                          <div className="p-4 bg-emerald-500/10 border border-emerald-500/30 rounded-2xl space-y-3 text-center animate-pulse">
-                            <span className="text-2xl block animate-bounce">🏥</span>
-                            <span className="text-xs text-emerald-400 font-extrabold block uppercase">Solicitando Doctor de Guardia</span>
-                            <p className="text-[10px] text-slate-300">
-                              Esperando que el médico cirujano de guardia reciba y acepte tu llamada de teleconsulta. No cierres la aplicación.
-                            </p>
-                            <div className="w-full bg-slate-800 rounded-full h-1 relative overflow-hidden">
-                              <div className="bg-emerald-500 h-full rounded-full animate-sweep" style={{ width: '40%' }} />
-                            </div>
-                          </div>
-                        )}
+                      // ==========================================
+                      // 2. LÓGICA DE GRÚA AISLADA E INTACTA
+                      // ==========================================
+                      const activeAssistance = (() => {
+                        const resolvedAssist = activeVialAssist || activeTowJob; // SOLO GRÚA
+                        if (!resolvedAssist) return null;
 
-                        {towState === 'dispatched' && activeTowJob && (
-                          <div className="p-3 bg-indigo-950/40 border border-indigo-800/40 rounded-2xl space-y-2.5">
-                            <div className="flex justify-between items-center">
-                              <span className="text-[10px] font-bold text-indicator animate-pulse text-indigo-400 font-mono">🚜 GRÚA EN RUTA</span>
-                              <span className="text-[10px] bg-immersive-card text-indigo-300 px-2 py-0.5 rounded border border-white/5 font-mono">
-                                ETA • {Math.ceil(activeTowJob.distance / 150)} min
-                              </span>
-                            </div>
+                        const rawState = resolvedAssist.estado || resolvedAssist.status || towState;
+                                       
+                        if (!rawState || rawState === 'completed' || rawState === 'cancelado' || rawState === 'completado' || rawState === 'idle') {
+                          return null;
+                        }
 
-                            {/* Transparent Pricing Split Details */}
-                            <div className="bg-slate-900 rounded-xl p-2.5 border border-indigo-500/15 text-[10px] space-y-1.5 font-mono">
-                              <div className="flex justify-between text-slate-400 border-b border-white/5 pb-1">
-                                <span>Vehículo Configurado:</span>
-                                <span className="text-white font-sans">{citizenVehicleType === 'coche' ? '🚗 Automóvil / Coche' : '🏍️ Motocicleta / Moto'}</span>
-                              </div>
-                              <div className="flex justify-between text-red-400">
-                                <span>Debitado de tu cuenta:</span>
-                                <strong>- $ {activeTowJob.price.toFixed(2)} USD</strong>
-                              </div>
-                              <div className="flex justify-between text-green-400">
-                                <span>Acreditado al chofer (Neto 80%):</span>
-                                <strong>+ $ {(activeTowJob.price * 0.8).toFixed(2)} USD</strong>
-                              </div>
-                              <div className="flex justify-between text-slate-500">
-                                <span>Fondo Operaciones (20%):</span>
-                                <span>$ {(activeTowJob.price * 0.2).toFixed(2)} USD</span>
-                              </div>
-                            </div>
+                        let est = 'pendiente';
+                        if (
+                          rawState === 'activa' || rawState === 'en_progreso' || rawState === 'active' ||
+                          rawState === 'en_route' || rawState === 'dispatched' || rawState === 'aceptado'
+                        ) {
+                          est = 'activa';
+                        } else if (rawState === 'pendiente' || rawState === 'pending' || rawState === 'proposed' || rawState === 'buscando') {
+                          est = 'pendiente';
+                        }
 
+                        return {
+                          id: resolvedAssist.id,
+                          estado: est,
+                          driverName: resolvedAssist.driverName || 'Operador Asignado',
+                          driverPhone: resolvedAssist.driverPhone || resolvedAssist.citizenPhone,
+                          vehiclePlate: activeTowJob?.vehiclePlate || resolvedAssist.vehiclePlate || 'Cargando...',
+                          price: resolvedAssist.price || resolvedAssist.costo_total || 30,
+                          distance: resolvedAssist.distance || resolvedAssist.distancia_metros || 5400,
+                          latitude: resolvedAssist.latitude || resolvedAssist.ubicacion_origen_lat || citizenCoords.lat,
+                          longitude: resolvedAssist.longitude || resolvedAssist.ubicacion_origen_lng || citizenCoords.lng
+                        };
+                      })();
+
+                      if (activeAssistance && activeAssistance.estado === 'pendiente') {
+                        return (
+                          <CitizenPendingTowLoader 
+                            assistId={activeAssistance.id}
+                            onActive={handleOnTowRequestActivated}
+                            onCancel={handleCancelTowRequest}
+                          />
+                        );
+                      }
+
+                      if (activeAssistance && (activeAssistance.estado === 'activa' || activeAssistance.estado === 'en_progreso')) {
+                        return (
+                          <div className="absolute inset-0 z-50 bg-slate-950 flex flex-col justify-stretch overflow-hidden animate-fade-in" id="citizen-active-tracking-fullscreen">
                             {/* Live road tracking map */}
-                            {towState === 'dispatched' && craneUnitState?.lat_actual && craneUnitState?.lng_actual && (activeTowJob?.latitude || citizenCoords.lat) && (activeTowJob?.longitude || citizenCoords.lng) ? (
-                              <div className="h-48 rounded-xl border border-indigo-500/20 overflow-hidden relative">
+                            {craneUnitState?.lat_actual && craneUnitState?.lng_actual && (activeAssistance?.latitude || citizenCoords.lat) && (activeAssistance?.longitude || citizenCoords.lng) ? (
+                              <div className="absolute inset-0 z-0">
                                 <RoadsideMap
                                   driverLat={craneUnitState.lat_actual}
                                   driverLng={craneUnitState.lng_actual}
-                                  citizenLat={activeTowJob?.latitude || citizenCoords.lat}
-                                  citizenLng={activeTowJob?.longitude || citizenCoords.lng}
+                                  citizenLat={activeAssistance?.latitude || citizenCoords.lat}
+                                  citizenLng={activeAssistance?.longitude || citizenCoords.lng}
                                 />
                               </div>
                             ) : (
-                              <div className="h-48 rounded-xl border border-slate-800/40 bg-slate-950 flex flex-col justify-center items-center p-3 text-center space-y-1">
-                                <span className="text-lg animate-spin text-indigo-400">📡</span>
-                                <span className="text-[10px] text-slate-400 font-bold uppercase tracking-wide">Esperando Señal GPS de la Grúa...</span>
-                                <p className="text-[9px] text-slate-500">El mapa satelital se activará apenas el conductor acepte el despacho vial.</p>
+                              <div className="absolute inset-0 bg-slate-950 flex flex-col justify-center items-center p-3 text-center space-y-1 z-0">
+                                <span className="text-xl animate-spin text-indigo-400">📡</span>
+                                <span className="text-[10px] text-slate-400 font-bold uppercase tracking-wide">Sincronizando señal GPS de la Grúa...</span>
                               </div>
                             )}
 
-                            <button 
-                              onClick={() => {
-                                setCitizenTab('agent');
-                              }}
-                              className="w-full bg-indigo-600 hover:bg-indigo-500 text-white py-1.5 rounded-xl text-[10px] font-bold transition-all text-center uppercase shadow"
-                            >
-                              💬 Abrir Chat Directo con Chofer
-                            </button>
-                          </div>
-                        )}
+                            <div className="absolute bottom-4 left-4 right-4 z-10 space-y-3 pointer-events-none animate-slide-up" id="floating-live-panel-fullscreen">
+                              <div className="bg-slate-900/95 backdrop-blur-md rounded-2xl p-4 border border-indigo-500/20 shadow-2xl pointer-events-auto text-left">
+                                <div className="flex justify-between items-center mb-3">
+                                  <div className="text-left">
+                                    <span className="text-[10px] font-bold text-indigo-400 font-mono tracking-widest uppercase animate-pulse block">🚜 GRÚA EN RUTA</span>
+                                    <h3 className="text-xs font-black text-white mt-1">Conductor: {activeAssistance.driverName || 'Operador de Guardia'}</h3>
+                                    <div className="flex items-center gap-2 mt-1">
+                                      <span className="text-[9px] bg-indigo-900 text-yellow-400 px-1.5 py-0.5 rounded font-bold uppercase tracking-wider border border-yellow-500/30">
+                                        Placa: {activeAssistance.vehiclePlate}
+                                      </span>
+                                    </div>
+                                  </div>
+                                  <span className="text-[10px] bg-indigo-900/40 text-indigo-200 px-2 py-1 rounded-lg border border-indigo-500/10 font-mono self-start shrink-0">
+                                    ETA • {Math.ceil((activeAssistance.distance || 5400) / 150) || 5} min
+                                  </span>
+                                </div>
 
-                         {sosState === 'calling' && (
-                           <div className="p-4 bg-amber-500/10 border border-amber-500/30 rounded-2xl text-center space-y-2 animate-pulse mb-3">
-                             <span className="text-xl block animate-bounce">⚖️</span>
-                             <span className="text-xs text-amber-400 font-extrabold block uppercase">Buscando Abogado Penalista...</span>
-                             <p className="text-[10px] text-slate-300 leading-normal">
-                               Estamos enlazando tu ubicación y requerimiento SOS con la central de defensas viales en vivo. Por favor espera a que un profesional de guardia tome el control.
-                             </p>
-                           </div>
-                         )}
+                                <div className="bg-slate-950/80 p-3 rounded-xl border border-white/5 text-[9.5px] space-y-1 font-mono mb-3">
+                                  <div className="flex justify-between text-slate-400"><span>Costo Total:</span><span className="font-bold text-red-400">$ {(activeAssistance.price || 30).toFixed(2)} USD</span></div>
+                                </div>
 
-                         {/* Core Emergency SOS Glowing Button */}
-                         <div className="p-5 bg-immersive-card border border-white/5 rounded-3xl text-center shadow-md relative overflow-hidden">
-                           <div className="absolute inset-0 bg-gradient-to-b from-rose-950/10 to-transparent" />
-                           <h4 className="text-xs font-extrabold text-slate-300 tracking-wide uppercase mb-3">Defensa Penal en Caliente</h4>
-                           
-                           {/* Active breath circular element */}
-                           <div className="relative py-4 flex justify-center">
-                             <button 
-                               onClick={handleSosTrigger}
-                               className={`w-36 h-36 rounded-full flex flex-col items-center justify-center text-white cursor-pointer select-none transition-all active:scale-90 ${sosState !== 'idle' ? 'bg-gradient-to-tr from-amber-600 to-amber-500 animate-pulse' : 'bg-gradient-to-tr from-red-650 to-red-500 glow-blue animate-pulse-glow'}`}
-                             >
-                               <span className="text-3xl">🛡️</span>
-                               <span className="text-xl font-black mt-1 font-mono tracking-tighter">
-                                 {sosState === 'idle' ? 'SOS' : 'SOS ACTIVO'}
-                               </span>
-                               <span className="text-[10px] font-bold uppercase text-rose-100 opacity-90 mt-0.5">
-                                 {sosState === 'idle' ? 'TOCA PARA DEFENSA' : 'CONECTANDO'}
-                               </span>
-                             </button>
-                           </div>
- 
-                           <p className="text-[10px] text-slate-400 leading-relaxed mt-2.5 px-3">
-                             Encuentros en retenes o alcabalas. Videollamada de defensa legal auditada y almacenada en la Nube de Seguridad.
-                           </p>
-
-                          <div className="mt-4 flex gap-2 justify-center">
-                            <button 
-                              onClick={() => {
-                                setShowWalletModal(true);
-                              }}
-                              className="bg-blue-600/15 hover:bg-blue-600/25 text-blue-400 py-2.5 px-6 rounded-2xl text-xs font-black border border-blue-500/20 shadow-lg shadow-blue-500/5 transition-all flex items-center gap-1.5 active:scale-95"
-                            >
-                              💰 Ver mi Saldo: $ {citizenBalance.toFixed(2)} USD
-                            </button>
-                          </div>
-                        </div>
-
-                        {/* Active livestream transmission container */}
-                        {isLiveVideoActive && (
-                          <div className="bg-immersive-card border border-blue-500/30 rounded-2xl p-3 space-y-2">
-                            <div className="flex justify-between items-center">
-                              <span className="text-[10px] font-bold text-red-500 flex items-center gap-1">
-                                <span className="w-1.5 h-1.5 bg-red-500 rounded-full animate-ping" />
-                                VIDEO CONEXIÓN SOS ACTIVA
-                              </span>
-                              <span className="text-[9px] text-slate-400 font-mono">
-                                ID: {activeEmergency?.id?.substring(0, 8).toUpperCase() || 'SALA'}
-                              </span>
-                            </div>
-
-                            {/* Actual Interactive Daily.co WebRTC Video Iframe */}
-                            <div className="h-64 bg-slate-950 rounded-xl relative overflow-hidden border border-white/5 shadow-inner">
-                              <iframe 
-                                src={activeEmergency?.dailyRoomUrl || "https://iframe.daily.co/secureflow-abogado-defensa"}
-                                allow="camera; microphone; fullscreen"
-                                className="w-full h-full border-0 absolute inset-0 rounded-xl"
-                                title="Daily.co Citizen SOS"
-                              />
-                              <div className="absolute top-2 left-2 bg-black/75 px-1.5 py-0.5 rounded text-[8px] text-red-400 font-mono tracking-wider pointer-events-none z-10 border border-white/5 uppercase">
-                                GRABACIÓN Y RESPALDO EN NUBE 🛡️
+                                <div className="flex gap-2">
+                                  <button onClick={handleCancelTowRequest} className="bg-red-950/60 border border-red-500/20 hover:bg-red-900/40 text-red-400 px-4 py-2.5 rounded-xl text-[10px] font-bold uppercase transition-all font-mono">Cancelar</button>
+                                  <button onClick={() => setCitizenTab('agent')} className="flex-1 bg-indigo-650 hover:bg-indigo-600 text-white py-2.5 rounded-xl text-xs font-black uppercase text-center shadow-lg">💬 Chat / Agente</button>
+                                  <button onClick={() => { setIsTowDailyCoActive(!isTowDailyCoActive); setTowDailyCoUrl(activeVialAssist?.sala_webrtc_url || ""); }} className="bg-slate-800 hover:bg-slate-755 text-indigo-300 px-3.5 py-2.5 rounded-xl text-xs font-bold border border-white/5 uppercase">📹 {isTowDailyCoActive ? 'Ocultar' : 'Video'}</button>
+                                </div>
                               </div>
                             </div>
+                          </div>
+                        );
+                      }
 
-                            <div className="flex justify-between items-center pt-1">
-                              <p className="text-[9px] text-slate-400 font-mono">
-                                📍 Lat: 10.4850 | Lng: -66.9030 (GPS Seguro)
+                      // CONDICIÓN A: Sin emergencia -> Retorna SOLO el dashboard principal (Botón SOS, módulos corporativos). NADA MÁS.
+                      return (
+                        <div className="p-4 space-y-4">
+                          {/* Welcome header in MD3 */}
+                          <div className="text-left mt-1.5">
+                            <h2 className="text-lg font-black text-white leading-tight">Hola, {citizenProfile.name.split(' ')[0]}</h2>
+                            <p className="text-[11px] text-slate-400 mt-0.5">En incidentes de tránsito o accidentes, mantén la calma.</p>
+                          </div>
+
+                          {/* Quick checking other states if any (ambulance, medic, sos search) */}
+                          {ambulanceState === 'proposed' && activeAmbulanceJob && (
+                            <div className="p-4 bg-red-500/10 border border-red-500/30 rounded-2xl space-y-3 text-center animate-pulse">
+                              <span className="text-2xl block animate-bounce">🚑</span>
+                              <span className="text-xs text-red-400 font-extrabold block uppercase">Solicitud de Ambulancia de Guardia</span>
+                              <p className="text-[10px] text-slate-300">
+                                Esperando que la unidad paramédica de resguardo SecureFlow confirme tu despacho físico. Por favor, mantente a la espera.
                               </p>
-                              <p className="text-[9px] text-emerald-400 font-extrabold uppercase">
-                                Amparo Legal Gaceta G-42.458
+                              <div className="w-full bg-slate-800 rounded-full h-1 relative overflow-hidden">
+                                <div className="bg-red-500 h-full rounded-full animate-sweep" style={{ width: '40%' }} />
+                              </div>
+                            </div>
+                          )}
+
+                          {medicState === 'calling' && activeMedicEmergency && (
+                            <div className="p-4 bg-emerald-500/10 border border-emerald-500/30 rounded-2xl space-y-3 text-center animate-pulse">
+                              <span className="text-2xl block animate-bounce">🏥</span>
+                              <span className="text-xs text-emerald-400 font-extrabold block uppercase">Solicitando Doctor de Guardia</span>
+                              <p className="text-[10px] text-slate-300">
+                                Esperando que el médico cirujano de guardia reciba y acepte tu llamada de teleconsulta. No cierres la aplicación.
+                              </p>
+                              <div className="w-full bg-slate-800 rounded-full h-1 relative overflow-hidden">
+                                <div className="bg-emerald-500 h-full rounded-full animate-sweep" style={{ width: '40%' }} />
+                              </div>
+                            </div>
+                          )}
+
+                          {sosState === 'calling' && (
+                            <div className="p-4 bg-amber-500/10 border border-amber-500/30 rounded-2xl text-center space-y-2 animate-pulse mb-3">
+                              <span className="text-xl block animate-bounce">⚖️</span>
+                              <span className="text-xs text-amber-400 font-extrabold block uppercase">Buscando Abogado Penalista...</span>
+                              <p className="text-[10px] text-slate-300 leading-normal">
+                                Estamos enlazando tu ubicación y requerimiento SOS con la central de defensas viales en vivo. Por favor espera a que un profesional de guardia tome el control.
                               </p>
                             </div>
+                          )}
+
+                          {/* Core Emergency SOS Glowing Button */}
+                          <div className="p-5 bg-immersive-card border border-white/5 rounded-3xl text-center shadow-md relative overflow-hidden">
+                            <div className="absolute inset-0 bg-gradient-to-b from-rose-950/10 to-transparent" />
+                            <h4 className="text-xs font-extrabold text-slate-300 tracking-wide uppercase mb-3">Defensa Penal en Caliente</h4>
+                            
+                            {/* Active breath circular element */}
+                            <div className="relative py-4 flex justify-center">
+                              <button 
+                                onClick={handleSosTrigger}
+                                className={`w-36 h-36 rounded-full flex flex-col items-center justify-center text-white cursor-pointer select-none transition-all active:scale-90 ${sosState !== 'idle' ? 'bg-gradient-to-tr from-amber-600 to-amber-500 animate-pulse' : 'bg-gradient-to-tr from-red-650 to-red-500 glow-blue animate-pulse-glow'}`}
+                              >
+                                <span className="text-3xl">🛡️</span>
+                                <span className="text-xl font-black mt-1 font-mono tracking-tighter">
+                                  {sosState === 'idle' ? 'SOS' : 'SOS ACTIVO'}
+                                </span>
+                                <span className="text-[10px] font-bold uppercase text-rose-100 opacity-90 mt-0.5">
+                                  {sosState === 'idle' ? 'TOCA PARA DEFENSA' : 'CONECTANDO'}
+                                </span>
+                              </button>
+                            </div>
+  
+                            <p className="text-[10px] text-slate-400 leading-relaxed mt-2.5 px-3">
+                              Encuentros en retenes o alcabalas. Videollamada de defensa legal auditada y almacenada en la Nube de Seguridad.
+                            </p>
+
+                            <div className="mt-4 flex gap-2 justify-center">
+                              <button 
+                                onClick={() => {
+                                  setShowWalletModal(true);
+                                }}
+                                className="bg-blue-600/15 hover:bg-blue-600/25 text-blue-400 py-2.5 px-6 rounded-2xl text-xs font-black border border-blue-500/20 shadow-lg shadow-blue-500/5 transition-all flex items-center gap-1.5 active:scale-95"
+                              >
+                                💰 Ver mi Saldo: $ {citizenBalance.toFixed(2)} USD
+                              </button>
+                            </div>
                           </div>
-                        )}
 
-                        {/* Quick Action Matrix Grid */}
-                        <div className="space-y-4">
-                          <h4 className="text-xs font-bold text-slate-400 uppercase tracking-wider block">Módulos Corporativos</h4>
-                          
-                          <div className="grid grid-cols-2 gap-2.5">
-                            <button 
-                              onClick={handleAmbulanceRequest}
-                              className="p-3 bg-red-500/10 border border-red-500/20 rounded-2xl text-left hover:bg-red-500/20 transition-all text-red-400"
-                            >
-                              <span className="text-lg block mb-1">🚑</span>
-                              <span className="text-xs font-bold block">Pedir Ambulancia</span>
-                            </button>
+                          {/* Active livestream transmission container */}
+                          {isLiveVideoActive && (
+                            <div className="bg-immersive-card border border-blue-500/30 rounded-2xl p-3 space-y-2">
+                              <div className="flex justify-between items-center">
+                                <span className="text-[10px] font-bold text-red-500 flex items-center gap-1">
+                                  <span className="w-1.5 h-1.5 bg-red-500 rounded-full animate-ping" />
+                                  VIDEO CONEXIÓN SOS ACTIVA
+                                </span>
+                                <span className="text-[9px] text-slate-400 font-mono">
+                                  ID: {activeEmergency?.id?.substring(0, 8).toUpperCase() || 'SALA'}
+                                </span>
+                              </div>
 
-                            <button 
-                              onClick={handleMedicRequest}
-                              className="p-3 bg-emerald-500/10 border border-emerald-500/20 rounded-2xl text-left hover:bg-emerald-500/20 transition-all text-emerald-400"
-                            >
-                              <span className="text-lg block mb-1">🏥</span>
-                              <span className="text-xs font-bold block">Médico Guardia</span>
-                            </button>
+                              {/* Actual Interactive Daily.co WebRTC Video Iframe */}
+                              <div className="h-64 bg-slate-950 rounded-xl relative overflow-hidden border border-white/5 shadow-inner">
+                                <iframe 
+                                  src={activeEmergency?.dailyRoomUrl || "https://iframe.daily.co/secureflow-abogado-defensa"}
+                                  allow="camera; microphone; fullscreen"
+                                  className="w-full h-full border-0 absolute inset-0 rounded-xl"
+                                  title="Daily.co Citizen SOS"
+                                />
+                                <div className="absolute top-2 left-2 bg-black/75 px-1.5 py-0.5 rounded text-[8px] text-red-400 font-mono tracking-wider pointer-events-none z-10 border border-white/5 uppercase">
+                                  GRABACIÓN Y RESPALDO EN NUBE 🛡️
+                                </div>
+                              </div>
 
-                            <button 
-                              onClick={() => {
-                                triggerPush('📍 GPS Localizado', 'Precisión: 4 metros. Latitud: 10.4850, Longitud: -66.9030.');
-                                showMaterialAlert('📍 Trazabilidad GPS', 'Tus coordenadas seguras se encuentran emitiendo a la central de control insurtech de SecureFlow.');
-                              }}
-                              className="p-3 bg-slate-900/60 border border-slate-800 rounded-2xl text-left hover:bg-slate-900 transition-all text-slate-300"
-                            >
-                              <span className="text-lg block mb-1">📍</span>
-                              <span className="text-xs font-bold block">GPS Preciso</span>
-                            </button>
+                              <div className="flex justify-between items-center pt-1">
+                                <p className="text-[9px] text-slate-400 font-mono">
+                                  📍 Lat: 10.4850 | Lng: -66.9030 (GPS Seguro)
+                                </p>
+                                <p className="text-[9px] text-emerald-400 font-extrabold uppercase">
+                                  Amparo Legal Gaceta G-42.458
+                                </p>
+                              </div>
+                            </div>
+                          )}
 
-                            <button 
-                              onClick={handleTowRequest}
-                              className="p-3 bg-yellow-500/10 border border-yellow-500/20 rounded-2xl text-left hover:bg-yellow-500/20 transition-all text-yellow-400"
-                            >
-                              <span className="text-lg block mb-1">🚜</span>
-                              <span className="text-xs font-bold block">Pedir Grúa</span>
-                            </button>
+                          {/* Quick Action Matrix Grid */}
+                          <div className="space-y-4">
+                            <h4 className="text-xs font-bold text-slate-400 uppercase tracking-wider block">Módulos Corporativos</h4>
+                            
+                            <div className="grid grid-cols-2 gap-2.5">
+                              <button 
+                                onClick={handleAmbulanceRequest}
+                                className="p-3 bg-red-500/10 border border-red-500/20 rounded-2xl text-left hover:bg-red-500/20 transition-all text-red-400"
+                              >
+                                <span className="text-lg block mb-1">🚑</span>
+                                <span className="text-xs font-bold block">Pedir Ambulancia</span>
+                              </button>
+
+                              <button 
+                                onClick={handleMedicRequest}
+                                className="p-3 bg-emerald-500/10 border border-emerald-500/20 rounded-2xl text-left hover:bg-emerald-500/20 transition-all text-emerald-400"
+                              >
+                                <span className="text-lg block mb-1">🏥</span>
+                                <span className="text-xs font-bold block">Médico Guardia</span>
+                              </button>
+
+                              <button 
+                                onClick={() => {
+                                  triggerPush('📍 GPS Localizado', 'Precisión: 4 metros. Latitud: 10.4850, Longitud: -66.9030.');
+                                  showMaterialAlert('📍 Trazabilidad GPS', 'Tus coordenadas seguras se encuentran emitiendo a la central de control insurtech de SecureFlow.');
+                                }}
+                                className="p-3 bg-slate-900/60 border border-slate-800 rounded-2xl text-left hover:bg-slate-900 transition-all text-slate-300"
+                              >
+                                <span className="text-lg block mb-1">📍</span>
+                                <span className="text-xs font-bold block">GPS Preciso</span>
+                              </button>
+
+                              <button 
+                                onClick={handleTowRequest}
+                                className="p-3 bg-yellow-500/10 border border-yellow-500/20 rounded-2xl text-left hover:bg-yellow-500/20 transition-all text-yellow-400"
+                              >
+                                <span className="text-lg block mb-1">🚜</span>
+                                <span className="text-xs font-bold block">Pedir Grúa</span>
+                              </button>
+                            </div>
+                          </div>
+
+                          {/* Gaceta background legal information */}
+                          <div className="bg-emerald-900/10 border border-emerald-500/20 p-4 rounded-2xl space-y-1.5 mt-2">
+                            <h4 className="text-xs font-bold text-emerald-400 flex items-center gap-1.5">
+                              <Scale className="w-3.5 h-3.5" /> Gaceta Oficial N° 42.458
+                            </h4>
+                            <p className="text-[11px] text-slate-300 leading-relaxed">
+                              "Resolución Conjunta: Los ciudadanos tienen pleno derecho a grabar procedimientos policiales en alcabalas vehiculares. Ningún funcionario puede quitarte el celular."
+                            </p>
                           </div>
                         </div>
-
-                        {/* Gaceta background legal information */}
-                        <div className="bg-emerald-900/10 border border-emerald-500/20 p-4 rounded-2xl space-y-1.5 mt-2">
-                          <h4 className="text-xs font-bold text-emerald-400 flex items-center gap-1.5">
-                            <Scale className="w-3.5 h-3.5" /> Gaceta Oficial N° 42.458
-                          </h4>
-                          <p className="text-[11px] text-slate-300 leading-relaxed">
-                            "Resolución Conjunta: Los ciudadanos tienen pleno derecho a grabar procedimientos policiales en alcabalas vehiculares. Ningún funcionario puede quitarte el celular."
-                          </p>
-                        </div>
-
-                      </div>
-                    )}
+                      );
+                    })()}
 
                     {/* TAB CITIZEN AI AGENT & CHATS */}
                     {citizenTab === 'agent' && (
@@ -4989,230 +6455,111 @@ export default function App() {
 
                   </div>
 
-                  {/* OVERLAY WINDOW: AMBULANCE EMERGENCY TRACKING & CHAT */}
+              {/* OVERLAY WINDOW: AMBULANCE EMERGENCY TRACKING & CHAT */}
                   {isAmbulanceWindowOpen && (
-                    <div className="absolute inset-0 bg-slate-950 z-30 flex flex-col justify-stretch">
-                      {/* Sub header with controls */}
-                      <div className="bg-red-950/40 border-b border-red-900/30 px-3 py-2 flex justify-between items-center shrink-0">
-                        <div className="flex items-center gap-2">
-                          <span className="w-2.5 h-2.5 bg-red-500 rounded-full animate-ping" />
-                          <span className="text-xs font-black text-red-400 uppercase tracking-wider">🚑 Patrulla de Resguardo</span>
-                        </div>
-                        <div className="flex items-center gap-2">
-                          <button 
-                            onClick={() => setIsAmbulanceDailyCoActive(prev => !prev)}
-                            className={`px-2.5 py-1 rounded-lg text-[9px] font-extrabold uppercase border flex items-center gap-1 transition-all ${
-                              isAmbulanceDailyCoActive 
-                                ? 'bg-red-650 text-white border-red-500 animate-pulse' 
-                                : 'bg-red-500/10 text-red-300 border-red-500/20 hover:bg-red-500/20'
-                            }`}
-                          >
-                            <span className="text-[12px]">📹</span>
-                            {isAmbulanceDailyCoActive ? 'Ocultar Video' : 'Pantalla Video'}
-                          </button>
-                          
-                          <button 
-                            onClick={() => setIsAmbulanceWindowOpen(false)}
-                            className="p-1 text-slate-400 hover:text-white"
-                          >
-                            ✕
-                          </button>
-                        </div>
+                    <div className="absolute inset-0 bg-slate-950 z-30 flex flex-col justify-stretch overflow-hidden animate-fade-in">
+                      
+                      {/* MAPA DE FONDO EXACTO AL DE LA GRÚA */}
+                      <div className="absolute inset-0 z-0">
+                        <RoadsideMap
+                          driverLat={ambulanceCoords?.lat || citizenCoords.lat + 0.0005}
+                          driverLng={ambulanceCoords?.lng || citizenCoords.lng + 0.0005}
+                          citizenLat={activeAmbulanceJob?.latitude || citizenCoords.lat}
+                          citizenLng={activeAmbulanceJob?.longitude || citizenCoords.lng}
+                        />
                       </div>
 
-                      {/* Video iframe or Main GPS + Live Chat container */}
-                      {isAmbulanceDailyCoActive ? (
-                        <div className="flex-1 flex flex-col bg-slate-950 overflow-hidden relative">
-                          <div className="bg-indigo-950/20 px-3 py-1.5 border-b border-white/5 flex justify-between items-center text-[10px] text-slate-400 shrink-0">
-                            <span>Sala WebRTC: <strong>daily.co/secureflow-trauma</strong></span>
-                            <span className="text-emerald-400 font-bold flex items-center gap-1">
-                              <span className="w-1.5 h-1.5 bg-emerald-500 rounded-full animate-ping" />
-                              CONECTADO EN VIVO
-                            </span>
-                          </div>
-                          
-                          {/* Daily.co mockup iframe */}
-                          <div className="flex-1 bg-slate-900 border-b border-white/5 relative flex items-center justify-center">
-                            <iframe 
-                              src="https://iframe.daily.co/secureflow-emergencia-vial" 
-                              allow="camera; microphone; fullscreen" 
-                              className="absolute inset-0 w-full h-full border-0 rounded-b-none"
-                              title="Daily.co Ambulance Stream"
-                            />
-                            {/* Static custom HUD to guarantee absolute visual premium styling */}
-                            <div className="absolute top-2 left-2 bg-black/60 backdrop-blur px-2 py-1 rounded text-[9px] text-white space-y-0.5 pointer-events-none z-10 border border-white/5">
-                              <div>PARAMÉDICO: Dr. Héctor Salas</div>
-                              <div>BITRATE: 1420kbps • FPS: 30</div>
-                            </div>
-                            
-                            <div className="absolute bottom-2 right-2 flex gap-1 z-10">
-                              <button 
-                                onClick={() => setIsAmbulanceDailyCoActive(false)}
-                                className="px-3 py-1 bg-red-600 hover:bg-red-700 text-white font-bold text-[9px] uppercase rounded-lg shadow-lg"
-                              >
-                                Desconectar Video
-                              </button>
-                            </div>
-                          </div>
-                          
-                          {/* Mini instructions underneath */}
-                          <div className="p-3 text-[10px] text-slate-400 bg-slate-900 shrink-0">
-                            El paramédico está visualizando tus signos previos. Mantenga la cámara frontal alineada.
-                          </div>
+                      {/* CABECERA FLOTANTE DE CIERRE */}
+                      <div className="absolute top-0 inset-x-0 z-20 bg-red-950/80 backdrop-blur-md border-b border-red-900/50 px-4 py-3 flex justify-between items-center shadow-lg">
+                        <div className="flex items-center gap-2">
+                          <span className="w-2.5 h-2.5 bg-red-500 rounded-full animate-ping" />
+                          <span className="text-xs font-black text-white uppercase tracking-wider">🚑 Patrulla en Ruta</span>
                         </div>
-                      ) : (
-                        <div className="flex-1 flex flex-col justify-stretch overflow-hidden">
-                          {/* Transparent Pricing Split Details for Ambulance */}
-                          <div className="bg-slate-900 border-b border-white/5 p-3 flex flex-col space-y-2 shrink-0">
-                            <div className="flex justify-between items-center">
-                              <span className="text-[10px] font-bold text-indicator animate-pulse text-red-100 font-mono">🚑 DETALLE DE TRANSFERENCIA S.O.S</span>
-                              <span className="text-[10px] bg-red-500/10 text-red-300 border border-red-500/20 px-2 py-0.5 rounded-md font-mono">
-                                {citizenVehicleType === 'coche' ? '🚗 Automóvil' : '🏍️ Motocicleta'} Asignado
+                        <button onClick={() => setIsAmbulanceWindowOpen(false)} className="bg-red-500/20 text-red-100 hover:bg-red-500/40 px-3 py-1 rounded-lg text-[10px] font-bold transition-all">
+                          MINIMIZAR
+                        </button>
+                      </div>
+
+                      {/* PANEL FLOTANTE INFERIOR EXACTO AL DE LA GRÚA */}
+                      <div className="absolute bottom-4 left-4 right-4 z-10 space-y-3 pointer-events-none animate-slide-up">
+                        
+                        <div className="bg-slate-900/95 backdrop-blur-md rounded-2xl p-4 border border-red-500/20 shadow-2xl pointer-events-auto text-left flex flex-col max-h-[70vh]">
+                          
+                          <div className="flex justify-between items-center mb-3 shrink-0">
+                            <div className="text-left">
+                              <span className="text-[10px] font-bold text-red-500 font-mono tracking-widest uppercase animate-pulse block">🚑 AMBULANCIA EN RUTA</span>
+                              <h3 className="text-xs font-black text-white mt-1">Paramédico: {activeAmbulanceJob?.driverName || 'Unidad Asignada'}</h3>
+                              <span className="text-[9px] text-slate-400 font-mono block mt-1">Placa: AMB-402X</span>
+                            </div>
+                            <div className="text-right">
+                              <span className="text-[10px] bg-red-900/40 text-red-200 px-2 py-1 rounded-lg border border-red-500/10 font-mono block mb-1">
+                                ETA • {Math.ceil((activeAmbulanceJob?.distance || 2100) / 150) || 5} min
+                              </span>
+                              <span className="text-[10px] font-black text-red-400 font-mono block">
+                                $ {(activeAmbulanceJob?.price || 50.00).toFixed(2)} USD
                               </span>
                             </div>
-
-                            <div className="bg-slate-950 rounded-xl p-2.5 border border-red-500/15 text-[10px] space-y-1.5 font-mono">
-                              <div className="flex justify-between text-red-400">
-                                <span>Debitado de tu cuenta:</span>
-                                <strong>- $ {activeAmbulanceJob ? activeAmbulanceJob.price.toFixed(2) : '35.00'} USD</strong>
-                              </div>
-                              <div className="flex justify-between text-green-400">
-                                <span>Acreditado al paramédico (80%):</span>
-                                <strong>+ $ {activeAmbulanceJob ? (activeAmbulanceJob.price * 0.8).toFixed(2) : '28.00'} USD</strong>
-                              </div>
-                              <div className="flex justify-between text-slate-500">
-                                <span>Plataforma SecureFlow (20%):</span>
-                                <span>$ {activeAmbulanceJob ? (activeAmbulanceJob.price * 0.2).toFixed(2) : '7.00'} USD</span>
-                              </div>
-                            </div>
                           </div>
 
-                          {/* 1. Real-time GPS Route Tracing Map */}
-                          <div className="h-44 bg-slate-950 border-b border-white/5 relative overflow-hidden shrink-0">
-                            {/* Grid paper mockup */}
-                            <svg className="absolute inset-0 w-full h-full opacity-10" width="100%" height="100%">
-                              <defs>
-                                <pattern id="sub-grid" width="20" height="20" patternUnits="userSpaceOnUse">
-                                  <path d="M 20 0 L 0 0 0 20" fill="none" stroke="white" strokeWidth="0.5" />
-                                </pattern>
-                              </defs>
-                              <rect width="100%" height="100%" fill="url(#sub-grid)" />
-                            </svg>
-
-                            {/* Dotted Route Tracing Path */}
-                            <svg className="absolute inset-0 w-full h-full pointer-events-none" width="100%" height="100%">
-                              <path 
-                                d="M 140,130 Q 185,110 220,70" 
-                                fill="none" 
-                                stroke="#ef4444" 
-                                strokeWidth="2" 
-                                strokeDasharray="4 4" 
+                          {/* VIDEO WEBRTC */}
+                          {isAmbulanceDailyCoActive && (
+                            <div className="w-full h-32 bg-slate-950 border border-red-500/20 rounded-xl relative overflow-hidden mb-3 shrink-0 shadow-inner">
+                              <iframe 
+                                src={activeAmbulanceJob?.dailyRoomUrl || "https://iframe.daily.co/secureflow-ambulancia"}
+                                allow="camera; microphone; fullscreen"
+                                className="w-full h-full border-0 absolute inset-0"
+                                title="Daily.co Ambulance"
                               />
-                            </svg>
-
-                            {/* User Marker */}
-                            <div className="absolute text-[18px] select-none z-10" style={{ left: '140px', top: '130px' }}>
-                              👤
-                              <span className="absolute -top-3 left-3 bg-blue-600 text-white font-black text-[7px] px-1 py-0.5 rounded uppercase">TÚ (GPS)</span>
                             </div>
+                          )}
 
-                            {/* Ambulance Marker */}
-                            <div 
-                              className="absolute text-[22px] select-none z-10 transition-all duration-1000 ease-out animate-pulse"
-                              style={{ 
-                                left: `${45 + (10.4900 - ambulanceCoords.lat) * 5000}%`, 
-                                top: `${60 + (-66.9100 - ambulanceCoords.lng) * 5000}%` 
-                              }}
-                            >
-                              🚑
-                              <span className="absolute -top-4 -left-2 bg-red-650 text-white font-black text-[7px] px-1 py-0.5 rounded uppercase animate-bounce whitespace-nowrap">Ruta Activa</span>
-                            </div>
-
-                            <div className="absolute bottom-2 left-3 bg-black/80 backdrop-blur border border-white/10 p-2 rounded-xl text-[9px] font-mono text-slate-300 space-y-0.5 z-10">
-                              <div>Unidad: AMB-402X • Dr. Héctor Salas</div>
-                              <div>Distancia: <strong className="text-white">{ambulanceDistance} metros</strong></div>
-                              <div>ETA: <strong className="text-red-400">{Math.ceil(ambulanceDistance / 150)} min</strong></div>
-                            </div>
-                          </div>
-
-                          {/* 2. Chat and clinical assistant toggle tabs */}
-                          <div className="flex-1 flex flex-col justify-stretch overflow-hidden bg-slate-900">
-                            {/* Chat messages */}
-                            <div className="flex-1 overflow-y-auto p-3 space-y-2">
-                              {ambulanceMessages.map((msg, idx) => (
-                                <div key={idx} className={`flex flex-col ${msg.sender === 'user' ? 'items-end' : 'items-start'}`}>
-                                  <span className="text-[8px] text-slate-500 font-mono mb-0.5">
-                                    {msg.sender === 'user' ? 'Asegurado (Tú)' : 'Paramédico Héctor'} • {msg.time}
-                                  </span>
-                                  <div className={`p-2.5 rounded-2xl text-[11px] max-w-[85%] leading-relaxed ${
-                                    msg.sender === 'user' 
-                                      ? 'bg-red-650 text-white rounded-tr-none' 
-                                      : 'bg-slate-800 text-slate-100 rounded-tl-none border border-white/5'
-                                  }`}>
-                                    {msg.text}
-                                  </div>
-                                </div>
-                              ))}
-                            </div>
-
-                            {/* Collapsible mini general AI assistance inside Trauma panel */}
-                            <div className="p-2 border-t border-white/5 bg-slate-950 space-y-2 shrink-0">
-                              {/* Clinical Trauma Assistant trigger button */}
-                              <div className="flex items-center justify-between">
-                                <span className="text-[9px] font-bold text-indicator animate-pulse text-indigo-400 flex items-center gap-1">
-                                  <span>🤖</span> ASISTENTE DE TRAUMA AI COMPARTIDO
+                          {/* CHAT BOX SCROLLABLE */}
+                          <div className="bg-slate-950/80 p-2 rounded-xl border border-white/5 mb-3 flex-1 overflow-y-auto scrollbar-thin min-h-[100px] space-y-2">
+                            {ambulanceMessages.map((msg, idx) => (
+                              <div key={idx} className={`flex flex-col ${msg.sender === 'user' ? 'items-end' : 'items-start'}`}>
+                                <span className="text-[8px] text-slate-500 font-mono mb-0.5 uppercase">
+                                  {msg.sender === 'user' ? 'Tú' : 'Paramédico'}
                                 </span>
+                                <div className={`p-2 rounded-xl text-[10px] max-w-[85%] leading-relaxed ${msg.sender === 'user' ? 'bg-red-650 text-white rounded-tr-none' : 'bg-slate-800 text-slate-100 rounded-tl-none border border-red-500/10'}`}>
+                                  {msg.text}
+                                </div>
                               </div>
-                              <div className="max-h-20 overflow-y-auto p-1.5 bg-slate-900 border border-white/5 rounded-xl text-[9px] text-slate-300 space-y-1 font-mono">
-                                {ambulanceAgentMessages.slice(-2).map((m, i) => (
-                                  <div key={i}>
-                                    <strong className="text-indigo-400">{m.sender === 'user' ? 'Tú : ' : 'AI : '}</strong>
-                                    {m.text}
-                                  </div>
-                                ))}
-                              </div>
-                              <div className="flex gap-1.5">
-                                <input 
-                                  type="text"
-                                  value={ambulanceAgentInput}
-                                  onChange={e => setAmbulanceAgentInput(e.target.value)}
-                                  onKeyDown={e => { if (e.key === 'Enter') handleSendAmbulanceAI(); }}
-                                  placeholder="¿Qué procedimientos se siguen? Pregunte a AI..."
-                                  className="flex-1 bg-slate-900 border border-white/5 rounded-lg px-2 py-1 text-[9px] text-white focus:outline-none"
-                                />
-                                <button 
-                                  onClick={handleSendAmbulanceAI}
-                                  className="px-2.5 bg-indigo-650 text-white font-bold text-[9px] rounded-lg"
-                                >
-                                  Consultar AI
-                                </button>
-                              </div>
-                            </div>
-
-                            {/* Message input */}
-                            <div className="p-2.5 bg-slate-950 border-t border-white/5 flex gap-2 shrink-0">
-                              <input 
-                                type="text"
-                                value={ambulanceChatInput}
-                                onChange={e => setAmbulanceChatInput(e.target.value)}
-                                onKeyDown={e => { if (e.key === 'Enter') handleSendAmbulanceMessage('user'); }}
-                                placeholder="Escribe al paramédico de la ambulancia..."
-                                className="flex-1 bg-slate-900 border border-white/5 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-red-500"
-                              />
-                              <button 
-                                onClick={() => handleSendAmbulanceMessage('user')}
-                                className="px-4 py-2 bg-red-650 hover:bg-red-750 text-white font-bold text-xs rounded-xl transition-all shrink-0"
-                              >
-                                Enviar
-                              </button>
-                            </div>
+                            ))}
                           </div>
+
+                          {/* INPUT DE CHAT */}
+                          <div className="flex gap-1.5 mb-3 shrink-0">
+                            <input 
+                              type="text"
+                              value={ambulanceChatInput}
+                              onChange={(e) => setAmbulanceChatInput(e.target.value)}
+                              onKeyDown={(e) => { if (e.key === 'Enter') handleSendAmbulanceMessage('user'); }}
+                              placeholder="Escribe al paramédico..."
+                              className="flex-1 bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-[10.5px] text-white focus:outline-none focus:border-red-500"
+                            />
+                            <button 
+                              onClick={() => handleSendAmbulanceMessage('user')}
+                              className="bg-red-650 hover:bg-red-600 text-white px-4 py-2 rounded-xl text-[10px] font-bold uppercase transition-all shadow-md active:scale-95"
+                            >
+                              Enviar
+                            </button>
+                          </div>
+
+                          {/* CONTROLES INFERIORES */}
+                          <div className="flex gap-2 shrink-0">
+                            <button 
+                              onClick={() => setIsAmbulanceDailyCoActive(!isAmbulanceDailyCoActive)}
+                              className="flex-1 bg-slate-800 hover:bg-slate-700 border border-red-500/20 text-red-300 py-2.5 rounded-xl text-[10px] font-bold uppercase transition-all flex items-center justify-center gap-1.5 shadow-md active:scale-95"
+                            >
+                              📹 {isAmbulanceDailyCoActive ? 'Ocultar Video' : 'Video WebRTC'}
+                            </button>
+                          </div>
+
                         </div>
-                      )}
+                      </div>
                     </div>
                   )}
-
-                  {/* OVERLAY WINDOW: MEDIC CHAT & TELEMEDICINE CAMERA */}
+            {/* OVERLAY WINDOW: MEDIC CHAT & TELEMEDICINE CAMERA */}
                   {isMedicWindowOpen && (
                     <div className="absolute inset-0 bg-slate-950 z-30 flex flex-col justify-stretch">
                       {/* Sub Header of Medical consultation */}
@@ -5243,51 +6590,38 @@ export default function App() {
                         </div>
                       </div>
 
-                      {/* Daily.co interactive clinical consultation frame */}
-                      {isMedicDailyCoActive ? (
-                        <div className="flex-1 flex flex-col bg-slate-950 overflow-hidden relative">
-                          <div className="bg-emerald-950/20 px-3 py-1.5 border-b border-white/5 flex justify-between items-center text-[10px] text-slate-400 shrink-0">
-                            <span>Sala WebRTC Médica: <strong>daily.co/secureflow-medic</strong></span>
-                            <span className="text-emerald-400 font-bold flex items-center gap-1">
-                              <span className="w-1.5 h-1.5 bg-emerald-500 rounded-full animate-ping" />
-                              TELEMEDICINA ACTIVA
-                            </span>
-                          </div>
-
-                          {/* Daily.co Clinical frame mockup */}
-                          <div className="flex-1 bg-slate-900 border-b border-white/5 relative flex items-center justify-center">
-                            <iframe 
-                              src="https://iframe.daily.co/secureflow-telemedicina-guardia" 
-                              allow="camera; microphone; fullscreen" 
-                              className="absolute inset-0 w-full h-full border-0 rounded-b-none"
-                              title="Daily.co Medic video consulting"
-                            />
-                            {/* Medical clinical HUD */}
-                            <div className="absolute top-2 left-2 bg-black/60 backdrop-blur px-2 py-1 rounded text-[9px] text-white space-y-0.5 pointer-events-none z-10 border border-white/5 mx-auto">
-                              <div>ESPECIALISTA: Dr. Luis Beltrán</div>
-                              <div>MEDICINA CRÍTICA / MSAS-42.501</div>
+                      {/* Frame Unificado de Telemedicina: WebRTC + IA + Chat */}
+                      <div className="flex-1 flex flex-col bg-slate-950 overflow-hidden relative">
+                        
+                        {/* 1. Capa de Video WebRTC (Expansión Inmersiva) */}
+                        <div className={`${isMedicDailyCoActive ? 'flex-[1.2]' : 'hidden'} min-h-[35vh] shrink-0 bg-black relative flex items-center justify-center transition-all shadow-inner`}>
+                          <iframe 
+                            src={activeMedicEmergency?.dailyRoomUrl || "https://iframe.daily.co/secureflow-telemedicina-guardia"} 
+                            allow="camera; microphone; fullscreen" 
+                            className="absolute inset-0 w-full h-full border-0 object-cover"
+                            title="Videoconsulta WebRTC"
+                          />
+                          {/* HUD Clínico Dinámico Mejorado */}
+                          <div className="absolute top-3 left-3 bg-black/70 backdrop-blur-md px-3 py-1.5 rounded-lg text-[9px] text-white pointer-events-none z-10 border border-white/10 shadow-xl flex flex-col gap-0.5">
+                            <div className="flex items-center gap-1.5 mb-0.5">
+                               <span className="w-1.5 h-1.5 bg-emerald-500 rounded-full animate-ping" />
+                               <span className="text-emerald-400 font-bold uppercase tracking-wider">MÉDICO EN LÍNEA</span>
                             </div>
-                            
-                            <div className="absolute bottom-2 right-2 flex gap-1 z-10">
-                              <button 
-                                onClick={() => setIsMedicDailyCoActive(false)}
-                                className="px-3 py-1 bg-red-650 hover:bg-red-750 text-white font-bold text-[9px] uppercase rounded-lg shadow-lg"
-                              >
-                                Apagar Cámara
-                              </button>
-                            </div>
+                            <div className="uppercase font-bold">DR. {activeMedicEmergency?.medicName || 'ESPECIALISTA'}</div>
+                            <div className="uppercase text-slate-400 text-[8px]">LICENCIA: {activeMedicEmergency?.medicLicense || 'MSAS-VERIFICANDO'}</div>
                           </div>
                         </div>
-                      ) : (
-                        <div className="flex-1 flex flex-col justify-stretch overflow-hidden bg-slate-900">
-                          {/* Chat history list */}
-                          <div className="flex-1 overflow-y-auto p-3 space-y-2">
-                            {medicMessages.map((msg, idx) => (
+
+                        {/* 2. Capa Interactiva: Chat y Asistente IA (Se ajusta al espacio restante) */}
+                        <div className="flex-1 flex flex-col justify-stretch overflow-hidden bg-slate-900 border-t border-slate-800">
+                          {/* Lista de Mensajes del Chat */}
+                          <div className="flex-1 overflow-y-auto p-3 space-y-2 scrollbar-thin">
+                            {medicMessages?.map((msg, idx) => (
                               <div key={idx} className={`flex flex-col ${msg.sender === 'user' ? 'items-end' : 'items-start'}`}>
-                                <span className="text-[8px] text-slate-500 font-mono mb-0.5">
-                                  {msg.sender === 'user' ? 'Asegurado (Tú)' : 'Dr. Luis Beltrán'} • {msg.time}
+                                <span className="text-[8px] text-slate-500 font-mono mb-0.5 uppercase">
+                                  {msg.sender === 'user' ? 'Asegurado (Tú)' : (activeMedicEmergency?.medicName || 'Médico')} • {msg.time}
                                 </span>
-                                <div className={`p-2.5 rounded-2xl text-[11px] max-w-[85%] leading-relaxed ${
+                                <div className={`p-2.5 rounded-2xl text-[11px] max-w-[85%] leading-relaxed shadow-sm ${
                                   msg.sender === 'user' 
                                     ? 'bg-emerald-600 text-white rounded-tr-none' 
                                     : 'bg-slate-800 text-slate-100 rounded-tl-none border border-white/5'
@@ -5298,70 +6632,63 @@ export default function App() {
                             ))}
                           </div>
 
-                          {/* Collapsible Clinical AI Diagnostics inside Doctor Consultation box */}
+                         {/* Diagnóstico Clínico IA (Acordeón Compacto) */}
                           <div className="p-2 border-t border-white/5 bg-slate-950 space-y-2 shrink-0">
                             <div className="flex items-center justify-between">
-                              <span className="text-[9px] font-bold text-indicator animate-pulse text-indigo-400 flex items-center gap-1">
-                                <span>🤖</span> ASISTENTE CLÍNICO AI COMPARTIDO
+                              <span className="text-xs font-bold text-indicator text-indigo-400 flex items-center gap-1.5">
+                                <span className="animate-pulse text-sm">🤖</span> ASISTENTE CLÍNICO AI COMPARTIDO
                               </span>
                             </div>
-                            <div className="max-h-20 overflow-y-auto p-1.5 bg-slate-900 border border-white/5 rounded-xl text-[9px] text-slate-300 space-y-1 font-mono">
-                              {medicAgentMessages.slice(-2).map((m, i) => (
-                                <div key={i}>
-                                  <strong className="text-indigo-400">{m.sender === 'user' ? 'Tú : ' : 'AI : '}</strong>
-                                  {m.text}
-                                </div>
-                              ))}
-                            </div>
+                            {/* Oculta la caja gris si no hay mensajes de la IA todavía */}
+                            {medicAgentMessages && medicAgentMessages.length > 0 && (
+                              <div className="max-h-[110px] overflow-y-auto p-2.5 bg-slate-900 border border-white/5 rounded-xl text-xs text-slate-200 space-y-1.5 font-mono scrollbar-thin">
+                                {medicAgentMessages.slice(-3).map((m, i) => (
+                                  <div key={i}>
+                                    <strong className="text-indigo-400">{m.sender === 'user' ? 'Tú : ' : 'AI : '}</strong>
+                                    {m.text}
+                                  </div>
+                                ))}
+                              </div>
+                            )}
                             <div className="flex gap-1.5">
                               <input 
                                 type="text"
                                 value={medicAgentInput}
                                 onChange={e => setMedicAgentInput(e.target.value)}
                                 onKeyDown={e => { if (e.key === 'Enter') handleSendMedicAI(); }}
-                                placeholder="Consulte dosis o triaje preliminar..."
-                                className="flex-1 bg-slate-900 border border-white/5 rounded-lg px-2 py-1 text-[9px] text-white focus:outline-none"
+                                placeholder="Consulte síntomas a la IA..."
+                                className="flex-1 bg-slate-900 border border-slate-800/80 rounded-lg px-3 py-2 text-xs text-white focus:outline-none focus:border-indigo-500 transition-colors"
                               />
                               <button 
                                 onClick={handleSendMedicAI}
-                                className="px-2.5 bg-indigo-650 text-white font-bold text-[9px] rounded-lg"
+                                className="px-4 bg-indigo-650 hover:bg-indigo-500 text-white font-bold text-xs uppercase tracking-wider rounded-lg active:scale-95 transition-all shadow-md"
                               >
-                                Consultar AI
+                                Consultar
                               </button>
                             </div>
                           </div>
 
-                          {/* Message inputs and trigger for Daily.co */}
-                          <div className="p-2.5 bg-slate-950 border-t border-white/5 flex items-center gap-2 shrink-0">
-                            <button 
-                              onClick={() => setIsMedicDailyCoActive(true)}
-                              className="p-2 bg-emerald-500/10 border border-emerald-500/20 hover:bg-emerald-500/25 text-emerald-400 rounded-xl transition-all shrink-0"
-                              title="Activar Videoconsulta Daily.co"
-                            >
-                              📹
-                            </button>
-                            
+                          {/* Inputs de Mensajes para el Médico */}
+                          <div className="p-2.5 bg-slate-950 border-t border-white/5 flex items-center gap-2 shrink-0 shadow-[0_-4px_10px_rgba(0,0,0,0.2)]">
                             <input 
                               type="text"
                               value={medicChatInput}
                               onChange={e => setMedicChatInput(e.target.value)}
                               onKeyDown={e => { if (e.key === 'Enter') handleSendMedicMessage('user'); }}
                               placeholder="Describe tus síntomas al especialista..."
-                              className="flex-1 bg-slate-900 border border-white/5 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-emerald-500"
+                              className="flex-1 bg-slate-900 border border-slate-800/80 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-emerald-500 transition-colors"
                             />
-                            
                             <button 
                               onClick={() => handleSendMedicMessage('user')}
-                              className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs rounded-xl transition-all shrink-0"
+                              className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs uppercase tracking-wider rounded-xl transition-all shrink-0 active:scale-95 shadow-md shadow-emerald-900/20"
                             >
                               Enviar
                             </button>
                           </div>
                         </div>
-                      )}
+                      </div>
                     </div>
                   )}
-
                   {/* Android Bottom bar navigation */}
                   <div className="h-14 bg-slate-900 border-t border-slate-800/60 shrink-0 flex justify-around items-center select-none z-10 px-4">
                     <button 
@@ -5391,7 +6718,8 @@ export default function App() {
                   </div>
 
                 </div>
-              )}
+              );
+            })()}
 
               {/* ---------------- SCREEN 3: LAWYER PORTAL ---------------- */}
               {activeDevice === 'lawyer' && sessionUser && (
@@ -5740,7 +7068,32 @@ export default function App() {
                               </div>
                             </div>
 
-                            {/* Incoming dispatch notifications to show multi-view communication */}
+                            {/* Waiting/Idle State */}
+                            {towState === 'idle' && (
+                              <div className="p-6 bg-slate-900 border border-slate-800 rounded-3xl text-center space-y-4">
+                                <div className="relative flex justify-center items-center h-16 w-16 mx-auto">
+                                  {towDriverOnline ? (
+                                    <>
+                                      <span className="animate-ping absolute inline-flex h-10 w-10 rounded-full bg-emerald-400 opacity-20"></span>
+                                      <span className="relative inline-flex rounded-full h-8 w-8 bg-emerald-500 justify-center items-center text-slate-950 text-sm font-black">🚜</span>
+                                    </>
+                                  ) : (
+                                    <span className="relative inline-flex rounded-full h-8 w-8 bg-slate-800 justify-center items-center text-slate-500 text-sm font-black">🚜</span>
+                                  )}
+                                </div>
+                                <div className="space-y-1">
+                                  <h4 className="text-sm font-medium text-white">
+                                    {towDriverOnline ? 'Central de Guardia Activa' : 'Guardia Inactiva'}
+                                  </h4>
+                                  <p className="text-[11px] text-slate-400">
+                                    {towDriverOnline 
+                                      ? 'En línea, esperando solicitudes reales del ciudadano en tiempo real...' 
+                                      : 'Desconectado del sistema. Activa tu disponibilidad para empezar a recibir alertas.'}
+                                  </p>
+                                </div>
+                              </div>
+                            )}
+{/* Incoming dispatch notifications to show multi-view communication */}
                             {towState === 'proposed' && activeTowJob && (
                               <div className="bg-yellow-500 text-slate-950 p-4 rounded-3xl space-y-3 shadow-xl animate-pulse">
                                 <div>
@@ -5748,9 +7101,23 @@ export default function App() {
                                     🚨 DESPACHO VIAL DETECTADO
                                   </span>
                                   <h4 className="text-sm font-black mt-2">Asegurado: {activeTowJob.citizenName}</h4>
-                                  <p className="text-[11px] text-slate-800 leading-tight mt-1">
-                                    Ubicación de colisión reportada a 3.4 km. Ganancia Estimada: $ {(activeTowJob.price * 0.90).toFixed(2)} USD (Deducción 10% App).
-                                  </p>
+                                  {(() => {
+                                    // Matemáticas con los datos GPS reales extraídos de la BD
+                                    const distKm = (activeTowJob.distance || 0) / 1000;
+                                    const baseF = tariffs.grua?.tarifa_base ?? 30.00;
+                                    const totalCalculated = activeTowJob.price || 0;
+                                    const costKm = totalCalculated - baseF;
+                                    const driverEarnings = totalCalculated * 0.80; // 80% ganancia neta
+                                    return (
+                                      <div className="text-[11px] text-slate-800 space-y-1 mt-2 font-mono">
+                                        <p>• Distancia real al ciudadano: <span className="font-sans font-bold">{distKm.toFixed(2)} Km</span></p>
+                                        <p>• Tarifa Base: <span className="font-sans font-bold">${baseF.toFixed(2)} USD</span></p>
+                                        <p>• Costo por Distancia: <span className="font-sans font-bold">${costKm > 0 ? costKm.toFixed(2) : '0.00'} USD</span></p>
+                                        <p className="border-t border-black/10 pt-1">• Costo Total a Cobrar: <span className="font-sans font-bold text-xs">${totalCalculated.toFixed(2)} USD</span></p>
+                                        <p className="font-sans font-extrabold text-slate-950">💰 Tu Ganancia Neta (80%): ${driverEarnings.toFixed(2)} USD</p>
+                                      </div>
+                                    );
+                                  })()}
                                 </div>
 
                                 <button 
@@ -5761,7 +7128,7 @@ export default function App() {
                                 </button>
                               </div>
                             )}
-
+                            
                             {/* Driver Navigation tracking details */}
                             {towState === 'dispatched' && activeTowJob && (
                               <div className="p-4 bg-slate-900 border border-slate-800 rounded-3xl space-y-3">
@@ -5775,13 +7142,25 @@ export default function App() {
 
                                 {/* Street map tracking active real Leaflet component */}
                                 {towState === 'dispatched' && craneUnitState?.lat_actual && craneUnitState?.lng_actual && (activeTowJob?.latitude || 10.4984) && (activeTowJob?.longitude || -66.8824) ? (
-                                  <div className="h-56 rounded-2xl border border-slate-800 overflow-hidden relative shadow-lg">
+                                  <div className="h-56 rounded-2xl border border-slate-800 overflow-hidden relative shadow-lg group">
                                     <RoadsideMap
                                       driverLat={craneUnitState.lat_actual}
                                       driverLng={craneUnitState.lng_actual}
                                       citizenLat={activeTowJob?.latitude || 10.4984}
                                       citizenLng={activeTowJob?.longitude || -66.8824}
                                     />
+                                    {/* BOTÓN MÁGICO A GOOGLE MAPS */}
+                                    <button
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        const dLat = activeTowJob?.latitude || citizenCoords.lat;
+                                        const dLng = activeTowJob?.longitude || citizenCoords.lng;
+                                        window.open(`https://www.google.com/maps/dir/?api=1&origin=${craneUnitState.lat_actual},${craneUnitState.lng_actual}&destination=${dLat},${dLng}&travelmode=driving`, '_blank');
+                                      }}
+                                      className="absolute bottom-3 right-3 z-[999] bg-blue-600 hover:bg-blue-500 text-white px-4 py-2 rounded-xl text-xs font-black shadow-2xl transition-all active:scale-95 border-2 border-white/20 uppercase"
+                                    >
+                                      📍 Navegar Ruta
+                                    </button>
                                   </div>
                                 ) : (
                                   <div className="h-56 rounded-2xl border border-slate-800/20 bg-slate-950 flex flex-col justify-center items-center p-3 text-center space-y-1">
@@ -5969,42 +7348,126 @@ export default function App() {
                               </div>
                             </div>
 
-                            {/* Secondary Note Details */}
-                            <div className="p-3.5 bg-slate-950/40 border border-slate-900 rounded-2xl flex items-start gap-2.5">
-                              <span className="text-sm">👮</span>
-                              <div className="space-y-0.5">
-                                <span className="text-[10px] text-slate-400 font-bold block uppercase">Reglamento Vial de Seguros</span>
-                                <p className="text-[10px] text-slate-500 leading-relaxed">
-                                  La Ley de Transporte Terrestre exige un registro preventivo de los siniestros de remolque para procesar el reclamo de grúa ante aseguradoras corporativas oficiales.
-                                </p>
+                     {/* Secondary Note Details */}
+                              <div className="p-3.5 bg-slate-950/40 border border-slate-900 rounded-2xl flex items-start gap-2.5">
+                                <span className="text-sm">👮</span>
+                                <div className="space-y-0.5">
+                                  <span className="text-[10px] text-slate-400 font-bold block uppercase">Reglamento Vial de Seguros</span>
+                                  <p className="text-[10px] text-slate-500 leading-relaxed">
+                                    La Ley de Transporte Terrestre exige un registro preventivo de los siniestros de remolque para procesar el reclamo de grúa ante aseguradoras corporativas oficiales.
+                                  </p>
+                                </div>
                               </div>
                             </div>
-                          </div>
-                        )}
+                          )}
 
-                      </div>
-                    )}
+                          {/* PANEL PERFIL DASHBOARD */}
+                          {driverTab === 'dashboard' && (
+                            <div className="flex-1 flex flex-col justify-stretch h-full space-y-4 animate-fade-in">
+                              {/* Tarjeta de Perfil */}
+                              <div className="p-4 bg-slate-900 border border-slate-800 rounded-3xl flex items-center gap-4">
+                                <div className="w-14 h-14 rounded-full bg-gradient-to-tr from-yellow-500 to-amber-600 flex items-center justify-center text-2xl shadow-lg shrink-0">
+                                  🚜
+                                </div>
+                                <div className="flex-1 min-w-0">
+                                  <h3 className="text-sm font-black text-white truncate">{driverProfile.name}</h3>
+                                  <p className="text-[10px] text-yellow-400 font-mono tracking-wider mt-0.5 font-bold uppercase">Placa: {driverProfile.vehiclePlate}</p>
+                                  <p className="text-[10px] text-slate-400 truncate mt-0.5">{driverProfile.email}</p>
+                                </div>
+                              </div>
 
-                  </div>
+                              {/* Resumen Financiero */}
+                              <div className="grid grid-cols-2 gap-3">
+                                <div className="p-4 bg-emerald-900/20 border border-emerald-500/30 rounded-2xl text-center space-y-1 shadow-inner">
+                                  <span className="text-[9px] text-emerald-400 font-bold uppercase tracking-wider block">Ganancias Netas</span>
+                                  <h4 className="text-lg font-black text-white font-mono">$ {driverBalance.toFixed(2)}</h4>
+                                  <span className="text-[8px] text-emerald-500/70 uppercase">Retirables</span>
+                                </div>
+                                
+                                <div className={`p-4 border rounded-2xl text-center space-y-1 shadow-inner ${driverDebt > 0 ? "bg-red-900/20 border-red-500/30" : "bg-slate-900/50 border-slate-800"}`}>
+                                  <span className={`text-[9px] font-bold uppercase tracking-wider block ${driverDebt > 0 ? "text-red-400" : "text-slate-500"}`}>Deuda Comisiones</span>
+                                  <h4 className="text-lg font-black text-white font-mono">$ {driverDebt.toFixed(2)}</h4>
+                                  {driverDebt > 0 ? (
+                                    <button 
+                                      onClick={() => setShowBinanceModal(true)}
+                                      className="mt-2 text-[9px] bg-red-600 hover:bg-red-500 text-white px-2 py-1 rounded-lg w-full font-bold transition-all uppercase"
+                                    >
+                                      Pagar Ahora
+                                    </button>
+                                  ) : (
+                                    <span className="text-[8px] text-slate-600 uppercase mt-2 block">Al Día</span>
+                                  )}
+                                </div>
+                              </div>
 
-                  {/* Android style driver bottom nav */}
-                  <div className="h-14 bg-slate-900 border-t border-slate-800/60 shrink-0 flex justify-around items-center px-4">
-                    <button 
-                      onClick={() => setDriverTab('vial')}
-                      className={`flex flex-col items-center gap-0.5 ${driverTab === 'vial' ? 'text-yellow-500 font-bold' : 'text-slate-500'}`}
-                    >
-                      <Truck className="w-5 h-5" />
-                      <span className="text-[9px]">Servicio</span>
-                    </button>
-                    
-                    <button 
-                      onClick={() => setDriverTab('agent')}
-                      className={`flex flex-col items-center gap-0.5 ${driverTab === 'agent' ? 'text-yellow-500 font-bold' : 'text-slate-500'}`}
-                    >
-                      <MessageSquare className="w-5 h-5" />
-                      <span className="text-[9px]">Soporte AI</span>
-                    </button>
-                  </div>
+                              {/* Historial de Viajes Completados */}
+                              <div className="p-4 bg-slate-900 border border-slate-800 rounded-3xl space-y-3">
+                                <span className="text-[10px] text-slate-400 uppercase tracking-widest font-bold block border-b border-slate-800/60 pb-2">
+                                  Historial de Remolques
+                                </span>
+                                
+                                <div className="space-y-2 max-h-[180px] overflow-y-auto scrollbar-thin pr-1">
+                                  {driverHistory.length > 0 ? (
+                                    driverHistory.map((item, idx) => (
+                                      <div key={item.id || idx} className="p-3 bg-slate-950 border border-slate-800 rounded-xl flex justify-between items-center text-xs">
+                                        <div>
+                                          <h5 className="font-bold text-white uppercase text-[10px]">Viaje #{item.servicio_id?.substring(0,8).toUpperCase() || 'V-N/A'}</h5>
+                                          <p className="text-[9px] text-slate-500 font-mono mt-0.5">
+                                            {item.created_at ? new Date(item.created_at).toLocaleDateString('es-VE', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : 'Reciente'}
+                                          </p>
+                                        </div>
+                                        <div className="text-right">
+                                          <span className="font-mono text-emerald-400 font-bold block text-[11px]">
+                                            +${Number(item.ganancia_profesional || 0).toFixed(2)}
+                                          </span>
+                                          <span className="font-mono text-slate-500 text-[8px] block">
+                                            Comisión: ${Number(item.comision_secureflow || 0).toFixed(2)}
+                                          </span>
+                                        </div>
+                                      </div>
+                                    ))
+                                  ) : (
+                                    <div className="py-6 text-center">
+                                      <span className="text-2xl opacity-50 block mb-2">🛣️</span>
+                                      <p className="text-[10px] text-slate-500">Aún no has completado servicios de grúa.</p>
+                                    </div>
+                                  )}
+                                </div>
+                              </div>
+                            </div>
+                          )}
+
+                        </div>
+                      )}
+
+                    </div>
+
+              {/* Android style driver bottom nav */}
+                    <div className="h-14 bg-slate-900 border-t border-slate-800/60 shrink-0 flex justify-around items-center px-4">
+                      <button 
+                        onClick={() => setDriverTab('vial')}
+                        className={`flex flex-col items-center gap-0.5 transition-colors ${driverTab === 'vial' ? 'text-yellow-500 font-bold' : 'text-slate-500 hover:text-slate-400'}`}
+                      >
+                        <Truck className="w-5 h-5 shrink-0" />
+                        <span className="text-[9px] uppercase">Servicio</span>
+                      </button>
+                      
+                      <button 
+                        onClick={() => setDriverTab('agent')}
+                        className={`flex flex-col items-center gap-0.5 transition-colors ${driverTab === 'agent' ? 'text-yellow-500 font-bold' : 'text-slate-500 hover:text-slate-400'}`}
+                      >
+                        <MessageSquare className="w-5 h-5 shrink-0" />
+                        <span className="text-[9px] uppercase">Soporte AI</span>
+                      </button>
+
+                      <button 
+                        onClick={() => setDriverTab('dashboard')}
+                        className={`flex flex-col items-center gap-0.5 transition-colors ${driverTab === 'dashboard' ? 'text-yellow-500 font-bold' : 'text-slate-500 hover:text-slate-400'}`}
+                      >
+                        <User className="w-5 h-5 shrink-0" />
+                        <span className="text-[9px] uppercase">Mi Perfil</span>
+                      </button>
+                    </div>
 
                 </div>
               )}
@@ -6095,22 +7558,20 @@ export default function App() {
                 </div>
               )}
 
-              {/* ---------------- SCREEN 6: AMBULANCE DISPATCH & MEDICAL GUARD PORTAL ---------------- */}
+             {/* ---------------- SCREEN 6: AMBULANCE SUPPORT PORTAL ---------------- */}
               {activeDevice === 'ambulance' && sessionUser && (
                 <div className="flex-1 flex flex-col justify-stretch">
+                  
                   {/* Top Bar */}
                   <div className="bg-slate-900 border-b border-slate-800/60 px-4 py-3 shrink-0 flex justify-between items-center z-10">
                     <div className="flex items-center gap-1.5">
                       <span className="text-xl">🚑</span>
-                      <span className="text-xs font-black text-white uppercase">Soporte Vital Guardia</span>
+                      <span className="text-xs font-black text-white uppercase">Paramédico Élite</span>
                     </div>
 
                     <div className="flex items-center gap-2">
-                      <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-emerald-950/60 text-emerald-400 border border-emerald-900/40">
-                        Saldo: $ {ambulanceBalanceClean.toFixed(2)}
-                      </span>
-                      <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-slate-800 text-teal-400">
-                        Ambulancia: Activa
+                      <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-red-950 text-red-400 border border-red-900/10">
+                        {completedAmbulanceSessions || 0} Servicios
                       </span>
                       <button 
                         onClick={handleSignOut}
@@ -6123,179 +7584,213 @@ export default function App() {
 
                   {/* Body Content */}
                   <div className="flex-1 overflow-y-auto px-4 py-3 space-y-4 scrollbar-thin">
-                    <div className="space-y-4">
-                      <div className="p-4 bg-slate-900 border border-slate-800 rounded-3xl text-center space-y-3">
-                        <span className="text-[10px] text-slate-500 font-bold uppercase block tracking-wider">Flota Terrestre</span>
-                        <div className="flex justify-between items-center bg-slate-950 p-3 rounded-2xl border border-slate-800">
-                          <span className="text-xs font-bold text-white">Estado de Guardia</span>
+                    
+                    {ambulanceTab === 'servicio' && (
+                      <div className="space-y-4">
+                        {/* Status card */}
+                        <div className="p-4 bg-slate-900 border border-slate-800 rounded-3xl text-center space-y-3">
+                          <span className="text-[10px] text-slate-500 font-bold uppercase block tracking-wider">Estado de la Unidad</span>
+                          <div className="flex justify-between items-center bg-slate-950 p-3 rounded-2xl border border-slate-800">
+                            <span className="text-xs font-bold text-white">Disponibilidad GPS</span>
+                            <button 
+                              onClick={() => setIsAmbulanceOnline(!isAmbulanceOnline)}
+                              className={`px-4 py-1.5 rounded-xl text-xs font-black tracking-wide transition-all ${isAmbulanceOnline ? 'bg-red-500 text-slate-950' : 'bg-slate-800 text-slate-300'}`}
+                            >
+                              {isAmbulanceOnline ? 'EN RUTA' : 'ESTACIONADO'}
+                            </button>
+                          </div>
+                        </div>
+
+                        {/* Incoming Request */}
+                        {ambulanceState === 'proposed' && activeAmbulanceJob && (
+                          <div className="bg-slate-900 border border-red-900/40 p-4 rounded-3xl space-y-4 animate-fade-in shadow-xl">
+                            <div>
+                              <span className="text-[9px] bg-red-500/10 text-red-400 font-bold uppercase tracking-widest px-1.5 py-0.5 rounded animate-pulse">
+                                🚨 EMERGENCIA MÉDICA DETECTADA
+                              </span>
+                              <h4 className="text-sm font-black mt-2 text-white">Paciente: {activeAmbulanceJob.citizenName}</h4>
+                              <p className="text-[11px] text-slate-400 mt-1 font-mono">
+                                Distancia aprox: 2.1 KM. Presione ACEPTAR para desplegar mapa y video.
+                              </p>
+                            </div>
+
+                            <button 
+                              onClick={async () => {
+                                setAmbulanceState('dispatched');
+                                triggerPush('🚑 Ruta de Rescate', 'Ruta hacia el asegurado iniciada con sirena encendida...');
+                                try {
+                                  await supabase
+                                    .from('asistencias_ambulancias')
+                                    .update({ 
+                                      estado: 'activa',
+                                      paramedico_id: sessionUser?.id || null
+                                    })
+                                    .eq('id', activeAmbulanceJob.id);
+                                } catch (e) {
+                                  console.error(e);
+                                }
+                              }}
+                              className="w-full bg-red-600 hover:bg-red-500 text-white py-3 rounded-xl text-xs font-black uppercase text-center transition-all shadow-md active:scale-95"
+                            >
+                              🚑 ACEPTAR Y DESPACHAR
+                            </button>
+                          </div>
+                        )}
+
+                        {/* Active Service: Map + Video + Chat */}
+                        {ambulanceState === 'dispatched' && activeAmbulanceJob && (
+                          <div className="p-4 bg-slate-900 border border-red-500/30 rounded-3xl space-y-4 shadow-xl">
+                            <div className="flex justify-between items-center bg-red-950/20 p-2 rounded-xl border border-red-900/10">
+                              <span className="text-[10px] text-red-400 font-bold flex items-center gap-1">
+                                <span className="w-1.5 h-1.5 bg-red-400 rounded-full animate-ping" />
+                                UNIDAD EN CAMINO
+                              </span>
+                              <span className="text-[10px] text-slate-300 font-mono">$ {activeAmbulanceJob.price?.toFixed(2) || '50.00'}</span>
+                            </div>
+
+                          {/* Botón de Google Maps INTACTO y con la ruta corregida */}
+                            <a 
+                              href={`https://www.google.com/maps/dir/?api=1&destination=${activeAmbulanceJob.latitude},${activeAmbulanceJob.longitude}`}
+                              target="_blank" rel="noreferrer"
+                              className="w-full bg-blue-600 hover:bg-blue-500 text-white py-2.5 rounded-xl text-[10px] font-black uppercase text-center flex items-center justify-center gap-2 shadow-md transition-all active:scale-95"
+                            >
+                              <MapPin className="w-4 h-4" /> ABRIR RUTA EN GOOGLE MAPS
+                            </a>
+
+                            {/* EL MAPA VISUAL PARA EL PARAMÉDICO */}
+                            <div className="h-48 rounded-2xl border border-slate-800 overflow-hidden relative shadow-lg">
+                              <RoadsideMap
+                                driverLat={ambulanceCoords?.lat || citizenCoords.lat}
+                                driverLng={ambulanceCoords?.lng || citizenCoords.lng}
+                                citizenLat={activeAmbulanceJob?.latitude || citizenCoords.lat}
+                                citizenLng={activeAmbulanceJob?.longitude || citizenCoords.lng}
+                              />
+                            </div>
+
+                            {/* Daily.co Iframe */}
+                            <div className="relative h-40 bg-slate-950 border border-slate-800 rounded-2xl overflow-hidden flex flex-col justify-stretch shadow-inner">
+                              <iframe 
+                                src={activeAmbulanceJob?.dailyRoomUrl || "https://iframe.daily.co/secureflow-ambulancia"} 
+                                allow="camera; microphone; fullscreen" className="flex-1 w-full border-0" title="Ambulance Video"
+                              />
+                            </div>
+
+                            {/* Chat Box */}
+                            <div className="space-y-1 bg-slate-950 p-2.5 rounded-2xl border border-slate-800">
+                              <span className="text-[8px] text-slate-500 font-bold uppercase block font-mono">Contacto Paciente</span>
+                              <div className="max-h-24 overflow-y-auto space-y-2 p-1 scrollbar-thin">
+                                {ambulanceMessages?.map((msg: any, idx: number) => (
+                                  <div key={idx} className={`flex flex-col ${msg.sender === 'driver' ? 'items-end' : 'items-start'}`}>
+                                    <div className={`p-2 rounded-xl text-[10px] max-w-[85%] ${msg.sender === 'driver' ? 'bg-red-600 text-white' : 'bg-slate-800 text-slate-300'}`}>
+                                      {msg.text}
+                                    </div>
+                                  </div>
+                                ))}
+                              </div>
+                              <div className="flex gap-1.5 pt-1.5 border-t border-white/5">
+                                <input 
+                                  type="text" value={ambulanceChatInput} onChange={(e) => setAmbulanceChatInput(e.target.value)}
+                                  onKeyDown={(e) => { if (e.key === 'Enter') handleSendAmbulanceMessage('driver'); }}
+                                  placeholder="Escribe al paciente..." className="flex-1 bg-slate-900 border border-slate-800 rounded-lg px-2 py-1 text-[10px] text-white focus:outline-none"
+                                />
+                                <button onClick={() => handleSendAmbulanceMessage('driver')} className="bg-red-600 text-white px-2 py-1 rounded-lg text-[9px] font-bold">Enviar</button>
+                              </div>
+                            </div>
+
+                            <button onClick={handleFinalizeAmbulanceJob} className="w-full bg-red-700 hover:bg-red-600 text-white py-3 rounded-2xl text-[11px] font-black uppercase text-center transition-all shadow-md active:scale-95">
+                              FINALIZAR ASISTENCIA MÉDICA
+                            </button>
+                          </div>
+                        )}
+
+                        {ambulanceState === 'idle' && (
+                          <div className="bg-slate-900 border border-slate-800 p-8 rounded-3xl text-center space-y-3">
+                            <span className="text-4xl block opacity-80">🚑</span>
+                            <h4 className="text-xs font-black text-slate-400 uppercase">Radar Activo</h4>
+                            <p className="text-[10px] text-slate-500">Esperando despacho de emergencias en tu zona de cobertura.</p>
+                          </div>
+                        )}
+                      </div>
+                    )}
+
+                    {/* DASHBOARD TAB */}
+                    {ambulanceTab === 'dashboard' && (
+                      <div className="space-y-4">
+                        <div className="p-4 bg-gradient-to-tr from-red-600 to-red-500 rounded-2xl text-white text-center shadow-md">
+                          <span className="text-[10px] font-bold uppercase tracking-widest block">Ganancias por Traslados</span>
+                          <h3 className="text-2xl font-black mt-1">$ {(totalAmbulanceEarnings || 0).toFixed(2)} USD</h3>
+                        </div>
+                        <div className="p-4 bg-slate-900 border border-slate-800 rounded-3xl text-center">
+                          <p className="text-[10px] text-slate-500">El historial detallado se sincronizará automáticamente al procesar pagos.</p>
+                        </div>
+                      </div>
+                    )}
+
+                  {/* AI AGENT TAB */}
+                    {ambulanceTab === 'agent' && (
+                      <div className="flex flex-col h-full bg-slate-950 rounded-2xl border border-slate-800">
+                        {/* Cabecera del Agente AI */}
+                        <div className="flex items-center gap-2 border-b border-slate-800 p-3 shrink-0 bg-slate-900/50 rounded-t-2xl">
+                          <span className="w-2.5 h-2.5 bg-indigo-500 rounded-full animate-pulse" />
+                          <div className="flex-1">
+                            <h4 className="text-xs font-black text-white uppercase">Asistencia Médica IA</h4>
+                            <p className="text-[9px] text-slate-500 font-mono tracking-wider">Protocolos Clínicos 24/7</p>
+                          </div>
+                        </div>
+
+                        <div className="flex-1 p-3 space-y-3 overflow-y-auto max-h-[300px] scrollbar-thin">
+                          {ambulanceAgentMessages?.map((msg: any, idx: number) => (
+                            <div key={idx} className={`flex flex-col ${msg.sender === 'user' ? 'items-end' : 'items-start'}`}>
+                              <span className="text-[8px] text-slate-500 mb-0.5 font-mono uppercase">{msg.sender === 'bot' ? 'IA Médica' : 'Tú'}</span>
+                              <div className={`p-2.5 rounded-2xl text-[11px] leading-relaxed max-w-[85%] ${msg.sender === 'user' ? 'bg-indigo-600 text-white font-bold rounded-tr-none' : 'bg-slate-900 text-slate-200 border border-slate-800 rounded-tl-none'}`}>
+                                <p className="whitespace-pre-line">{msg.text}</p>
+                              </div>
+                            </div>
+                          ))}
+
+                          {isAmbulanceSupportPending && (
+                            <div className="flex flex-col items-start animate-pulse">
+                              <span className="text-[8px] text-slate-500 mb-0.5 font-mono uppercase">IA Médica</span>
+                              <div className="p-2.5 rounded-2xl text-[11px] max-w-[85%] bg-slate-900 text-slate-400 border border-slate-800 rounded-tl-none flex items-center gap-1.5">
+                                <span>Analizando escenario clínico...</span>
+                                <span className="w-1.5 h-1.5 bg-indigo-500 rounded-full animate-bounce" />
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                        <div className="p-2 border-t border-slate-800 flex gap-1.5 bg-slate-900/40 rounded-b-2xl">
+                          <input 
+                            type="text" 
+                            value={ambulanceAgentInput} 
+                            onChange={(e) => setAmbulanceAgentInput(e.target.value)} 
+                            onKeyDown={(e) => { if (e.key === 'Enter') handleSendAmbulanceAI(); }} 
+                            placeholder="Consulta protocolos médicos, dosis, síntomas..." 
+                            className="flex-1 bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-indigo-500" 
+                          />
                           <button 
-                            onClick={() => {
-                              setIsAmbulanceOnline(!isAmbulanceOnline);
-                              triggerPush('🚑 Guardia Médica', isAmbulanceOnline ? 'Ambulancia se reporta libre descanso.' : 'Ambulancia en guardia de cuidados críticos.');
-                            }}
-                            className={`px-4 py-1.5 rounded-xl text-xs font-black tracking-wide ${isAmbulanceOnline ? 'bg-emerald-500 text-slate-950' : 'bg-slate-800 text-slate-300'}`}
+                            onClick={handleSendAmbulanceAI} 
+                            disabled={isAmbulanceSupportPending}
+                            className="px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 disabled:bg-slate-800 text-white transition-all active:scale-95 flex items-center justify-center"
                           >
-                            {isAmbulanceOnline ? 'ONLINE' : 'DESACTIVADO'}
+                            <Send className="w-4 h-4" />
                           </button>
                         </div>
                       </div>
-
-                      {/* Pending Job Card */}
-                      {ambulanceState === 'proposed' && activeAmbulanceJob && (
-                        <div className="bg-red-505 text-white p-4 rounded-3xl space-y-3 shadow-xl animate-pulse">
-                          <div>
-                            <span className="text-[9px] bg-black/10 font-bold uppercase px-1.5 py-0.5 rounded">
-                              🚨 TRASLADO CRÍTICO REPORTADO
-                            </span>
-                            <h4 className="text-sm font-black mt-2">Paciente: {activeAmbulanceJob.citizenName}</h4>
-                            <p className="text-[11px] text-rose-100 leading-tight mt-1">
-                              Soporte de cuidados a 2.1 Km de distancia. Tarifa contratada: $ {activeAmbulanceJob.price.toFixed(2)} USD.
-                            </p>
-                          </div>
-
-                          <button 
-                            onClick={async () => {
-                              setAmbulanceState('dispatched');
-                              triggerPush('🚑 Ruta de Rescate', 'Ruta hacia el asegurado iniciada con sirena encendida...');
-                              try {
-                                await supabase
-                                  .from('emergencias_activas')
-                                  .update({ 
-                                    estado: 'activa',
-                                    abogado_id: sessionUser?.id || null
-                                  })
-                                  .eq('id', activeAmbulanceJob.id);
-                              } catch (e) {
-                                console.error(e);
-                              }
-                            }}
-                            className="w-full bg-slate-950 text-red-400 py-2.5 rounded-xl text-xs font-black uppercase text-center hover:bg-slate-900 transition-all shadow-md"
-                          >
-                            ACEPTAR TRASLADO DE EMERGENCIA
-                          </button>
-                        </div>
-                      )}
-
-                      {/* Active Dispatch Chat & Control */}
-                      {ambulanceState === 'dispatched' && activeAmbulanceJob && (
-                        <div className="p-4 bg-slate-900 border border-slate-805 rounded-3xl space-y-4">
-                          <div className="flex justify-between items-center">
-                            <span className="text-[10px] text-red-400 font-bold flex items-center gap-1">
-                              <span className="w-1.5 h-1.5 bg-red-500 rounded-full animate-ping" />
-                              UNIDAD EN RUTA CON GPS ACTIVO
-                            </span>
-                            <span className="text-[10px] text-slate-500">ID: {activeAmbulanceJob.id.substring(0, 8).toUpperCase()}</span>
-                          </div>
-
-                          <div className="space-y-1 bg-slate-950 p-2.5 rounded-2xl border border-slate-800">
-                            <div className="text-[10px] text-slate-400">Paciente: <strong className="text-white">{activeAmbulanceJob.citizenName}</strong></div>
-                            <div className="text-[10px] text-slate-400">Teléfono: <strong className="text-white">{activeAmbulanceJob.citizenPhone}</strong></div>
-                            <div className="text-[10px] text-slate-400">Dirección: <strong className="text-white">Caracas (GPS Trazable)</strong></div>
-                          </div>
-
-                          {/* 1. Daily.co Video consultation room for Paramedic */}
-                          <div className="p-3 bg-slate-950 border border-slate-850 rounded-2xl space-y-2">
-                            <div className="flex items-center justify-between">
-                              <span className="text-[9px] text-teal-400 font-bold uppercase block">Canal Directo Daily.co</span>
-                              <span className="text-[8px] text-slate-500 bg-slate-900 px-1.5 py-0.5 rounded border border-white/5 font-mono">https://iframe.daily.co/secureflow-emergencia-vial</span>
-                            </div>
-                            <iframe 
-                              src="https://iframe.daily.co/secureflow-emergencia-vial" 
-                              allow="camera; microphone; fullscreen" 
-                              className="w-full h-44 rounded-xl border border-white/5" 
-                              title="Daily.co Paramedic Interface"
-                            />
-                          </div>
-
-                          {/* 2. Asistente de Trauma AI Technical Assistant to query Gemini */}
-                          <div className="p-3 bg-indigo-950/20 border border-indigo-900/40 rounded-2xl space-y-2">
-                            <div className="flex items-center gap-1.5">
-                              <span className="text-xs">🤖</span>
-                              <span className="text-[10px] uppercase font-black text-indigo-400">Asistente AI de Trauma de Guardia</span>
-                            </div>
-                            <div className="max-h-24 overflow-y-auto bg-slate-950 p-2.5 rounded-xl text-[10px] space-y-1 font-mono text-slate-300">
-                              {ambulanceAgentMessages.map((m, i) => (
-                                <div key={i}>
-                                  <strong className="text-indigo-400">{m.sender === 'user' ? 'Tú : ' : 'AI : '}</strong>
-                                  {m.text}
-                                </div>
-                              ))}
-                            </div>
-                            <div className="flex gap-1.5">
-                              <input 
-                                type="text"
-                                value={ambulanceAgentInput}
-                                onChange={e => setAmbulanceAgentInput(e.target.value)}
-                                onKeyDown={e => { if (e.key === 'Enter') handleSendAmbulanceAI(); }}
-                                placeholder="Consultar protocolos clínicos para quemaduras, soporte..."
-                                className="flex-1 bg-slate-950 border border-slate-800/80 rounded-lg px-2 py-1.5 text-[10px] text-white focus:outline-none"
-                              />
-                              <button 
-                                onClick={handleSendAmbulanceAI}
-                                className="px-3 bg-indigo-650 text-white font-bold text-[9px] rounded-lg focus:outline-none"
-                              >
-                                Preguntar
-                              </button>
-                            </div>
-                          </div>
-
-                          {/* 3. Chat Box with Citizen */}
-                          <div className="space-y-2">
-                            <span className="text-[9px] text-slate-400 font-bold uppercase block">Mensajería Paciente</span>
-                            <div className="border border-slate-800 rounded-2xl p-2.5 bg-slate-950/50 space-y-2 h-36 overflow-y-auto">
-                              {ambulanceMessages.map((msg: any, idx: number) => (
-                                <div key={idx} className={`text-[11px] ${msg.sender === 'driver' ? 'text-blue-400 text-right' : 'text-slate-300'}`}>
-                                  <span className="font-bold">{msg.sender === 'driver' ? 'Tú (Paramédico)' : 'Asegurado'}: </span>
-                                  {msg.text}
-                                </div>
-                              ))}
-                            </div>
-
-                            <div className="flex gap-1.5">
-                              <input 
-                                type="text"
-                                value={ambulanceChatInput}
-                                onChange={(e) => setAmbulanceChatInput(e.target.value)}
-                                onKeyDown={(e) => { if (e.key === 'Enter') handleSendAmbulanceMessage('driver'); }}
-                                placeholder="Escribe al asegurado..."
-                                className="flex-1 bg-slate-950 border border-slate-800/80 rounded-xl px-3 py-1.5 text-xs text-white focus:outline-none"
-                              />
-                              <button 
-                                onClick={() => handleSendAmbulanceMessage('driver')}
-                                className="bg-blue-600 text-white px-3 py-1.5 rounded-xl text-xs font-bold"
-                              >
-                                Enviar
-                              </button>
-                            </div>
-                          </div>
-
-                          <button 
-                            onClick={handleFinalizeAmbulanceJob}
-                            className="w-full bg-emerald-600 hover:bg-emerald-500 text-slate-950 py-2.5 rounded-2xl text-[11px] font-black uppercase text-center transition-all shadow-md"
-                          >
-                            MARCAR COMO ENTREGADO / TERMINADO
-                          </button>
-                        </div>
-                      )}
-
-                      {/* Idle state info */}
-                      {ambulanceState === 'idle' && (
-                        <div className="bg-slate-900 border border-slate-800 p-8 rounded-3xl text-center space-y-3">
-                          <span className="text-3xl">📡</span>
-                          <h4 className="text-xs font-bold text-white uppercase">Canal de Despacho</h4>
-                          <p className="text-[10px] text-slate-500">
-                            Esperando llamadas de trauma o soporte crítico desde el centro insurtech nacional de SecureFlow.
-                          </p>
-                        </div>
-                      )}
-                    </div>
+                    )}
+                  {/* Bottom Nav */}
+                  <div className="h-14 bg-slate-900 border-t border-slate-800/60 shrink-0 flex justify-around items-center px-4">
+                    <button onClick={() => setAmbulanceTab('servicio')} className={`flex flex-col items-center gap-0.5 ${ambulanceTab === 'servicio' ? 'text-red-500 font-bold' : 'text-slate-500'}`}><Truck className="w-5 h-5" /><span className="text-[9px] uppercase">Ruta</span></button>
+                    <button onClick={() => setAmbulanceTab('agent')} className={`flex flex-col items-center gap-0.5 ${ambulanceTab === 'agent' ? 'text-indigo-500 font-bold' : 'text-slate-500'}`}><Activity className="w-5 h-5" /><span className="text-[9px] uppercase">IA</span></button>
+                    <button onClick={() => setAmbulanceTab('dashboard')} className={`flex flex-col items-center gap-0.5 ${ambulanceTab === 'dashboard' ? 'text-red-500 font-bold' : 'text-slate-500'}`}><DollarSign className="w-5 h-5" /><span className="text-[9px] uppercase">Ganancias</span></button>
                   </div>
+                </div>
                 </div>
               )}
 
               {/* ---------------- SCREEN 7: DOCTOR GUARD PORTAL ---------------- */}
-              {activeDevice === 'medic' && sessionUser && (
+         {activeDevice === 'medic' && sessionUser && (
                 <div className="flex-1 flex flex-col justify-stretch">
+                  
                   {/* Top Bar */}
                   <div className="bg-slate-900 border-b border-slate-800/60 px-4 py-3 shrink-0 flex justify-between items-center z-10">
                     <div className="flex items-center gap-1.5">
@@ -6305,7 +7800,7 @@ export default function App() {
 
                     <div className="flex items-center gap-2">
                       <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-emerald-950 text-emerald-400 border border-emerald-900/10">
-                        Triaje de Guardia
+                        {completedMedicSessions} Consultas
                       </span>
                       <button 
                         onClick={handleSignOut}
@@ -6318,207 +7813,240 @@ export default function App() {
 
                   {/* Body Content */}
                   <div className="flex-1 overflow-y-auto px-4 py-3 space-y-4 scrollbar-thin">
-                    <div className="space-y-4">
-                      {/* Status card */}
-                      <div className="p-4 bg-slate-900 border border-slate-800 rounded-3xl text-center space-y-3">
-                        <span className="text-[10px] text-slate-500 font-bold uppercase block tracking-wider">Médico Guardia</span>
-                        <div className="flex justify-between items-center bg-slate-950 p-3 rounded-2xl border border-slate-800">
-                          <span className="text-xs font-bold text-white">Disponibilidad Telemedicina</span>
+                    
+                    {medicTab === 'guardia' && (
+                      <div className="space-y-4">
+                        {/* Status card */}
+                        <div className="p-4 bg-slate-900 border border-slate-800 rounded-3xl text-center space-y-3">
+                          <span className="text-[10px] text-slate-500 font-bold uppercase block tracking-wider">Estado de Guardia Médica</span>
+                          <div className="flex justify-between items-center bg-slate-950 p-3 rounded-2xl border border-slate-800">
+                            <span className="text-xs font-bold text-white">Disponibilidad Telemedicina</span>
+                            <button 
+                              onClick={() => {
+                                setIsMedicOnline(!isMedicOnline);
+                                triggerPush('🏥 Telemedicina Guardia', isMedicOnline ? 'Doctor desconectado de guardia.' : 'Especialista en guardia de teleconsulta activa.');
+                              }}
+                              className={`px-4 py-1.5 rounded-xl text-xs font-black tracking-wide transition-all ${isMedicOnline ? 'bg-emerald-500 text-slate-950 hover:opacity-90' : 'bg-slate-800 text-slate-300'}`}
+                            >
+                              {isMedicOnline ? 'ONLINE' : 'DESACTIVADO'}
+                            </button>
+                          </div>
+                        </div>
+
+                        {/* Active Video consultation proposal block */}
+                        {medicState === 'calling' && activeMedicEmergency && (
+                          <div className="bg-slate-900 border border-emerald-900/40 p-4 rounded-3xl space-y-4 animate-fade-in shadow-xl">
+                            <div>
+                              <span className="text-[9px] bg-emerald-500/10 text-emerald-400 font-bold uppercase tracking-widest px-1.5 py-0.5 rounded">
+                                📞 SOLICITUD DE ASISTENCIA MÉDICA
+                              </span>
+                              <h4 className="text-sm font-black mt-2 text-white">Paciente: {activeMedicEmergency.citizenName}</h4>
+                              <p className="text-[11px] text-slate-400 mt-1">
+                                Presione Conectar para establecer enlace de video cifrado y abrir el expediente.
+                              </p>
+                            </div>
+
+                            <button 
+                              onClick={async () => {
+                                setMedicState('active');
+                                triggerPush('📹 Sala Telemédica', 'Consulta iniciada. Estableciendo transmisión de video bidireccional...');
+                                try {
+                                  await supabase.from('asistencias_medicas').update({ estado: 'activa', medico_id: sessionUser?.id }).eq('id', activeMedicEmergency.id);
+                                } catch (e) {}
+                              }}
+                              className="w-full bg-emerald-600 hover:bg-emerald-500 text-slate-950 py-3 rounded-xl text-xs font-black uppercase text-center transition-all shadow-md active:scale-95"
+                            >
+                              🏥 ACEPTAR Y CONECTAR
+                            </button>
+                          </div>
+                        )}
+
+                       {/* Active Consulting Stream Frame */}
+                        {medicState === 'active' && activeMedicEmergency && (
+                          <div className="p-4 bg-slate-900 border border-emerald-500/30 rounded-3xl space-y-4 shadow-xl">
+                            <div className="flex justify-between items-center bg-emerald-950/20 p-2 rounded-xl border border-emerald-900/10">
+                              <span className="text-[10px] text-emerald-400 font-bold flex items-center gap-1">
+                                <span className="w-1.5 h-1.5 bg-emerald-400 rounded-full animate-ping" />
+                                SALA CLÍNICA ACTIVA
+                              </span>
+                              <span className="text-[10px] text-slate-300 font-mono">$ {activeMedicEmergency.price?.toFixed(2) || '20.00'}</span>
+                            </div>
+
+                            {/* Real-world Daily.co Iframe consulting - Expandido para visibilidad */}
+                            <div className="relative h-[45vh] bg-slate-950 border border-slate-800 rounded-2xl overflow-hidden flex flex-col justify-stretch shadow-inner">
+                              <iframe 
+                                src={activeMedicEmergency?.dailyRoomUrl || "https://iframe.daily.co/secureflow-medico-consulta"} 
+                                allow="camera; microphone; autofocus; fullscreen" 
+                                className="flex-1 w-full border-0 object-cover" 
+                                title="Daily.co Doctor Consultation Room"
+                              />
+                              <div className="absolute top-2 left-2 bg-black/75 px-2 py-0.5 rounded text-[8px] text-emerald-400 font-mono tracking-wider pointer-events-none z-10 border border-white/5 uppercase">
+                                ENLACE CIFRADO ACTIVO
+                              </div>
+                            </div>
+
+                            {/* Chat block */}
+                            <div className="space-y-1 bg-slate-950 p-2.5 rounded-2xl border border-slate-800">
+                              <span className="text-[8px] text-slate-500 font-bold uppercase block font-mono">Chat Médico Confidencial</span>
+                              <div className="max-h-28 overflow-y-auto space-y-2 p-1 scrollbar-thin">
+                                {medicMessages?.map((msg: any, idx: number) => (
+                                  <div key={idx} className={`flex flex-col ${msg.sender === 'driver' ? 'items-end' : 'items-start'}`}>
+                                    <div className={`p-2.5 rounded-2xl text-[11px] max-w-[85%] leading-relaxed ${msg.sender === 'driver' ? 'bg-emerald-600 text-white rounded-tr-none font-bold' : 'bg-slate-800 text-slate-300 rounded-tl-none border border-white/5'}`}>
+                                      {msg.text}
+                                    </div>
+                                  </div>
+                                ))}
+                              </div>
+                              <div className="flex gap-1.5 pt-1.5 border-t border-white/5">
+                                <input 
+                                  type="text"
+                                  value={medicChatInput}
+                                  onChange={(e) => setMedicChatInput(e.target.value)}
+                                  onKeyDown={(e) => { if (e.key === 'Enter') handleSendMedicMessage('driver'); }}
+                                  placeholder="Escribe al paciente..."
+                                  className="flex-1 bg-slate-900 border border-slate-800/80 rounded-lg px-2 py-1.5 text-[11px] text-white focus:outline-none"
+                                />
+                                <button 
+                                  onClick={() => handleSendMedicMessage('driver')}
+                                  className="bg-emerald-600 text-slate-950 px-3 py-1 rounded-lg text-[10px] font-bold active:scale-95"
+                                >
+                                  Enviar
+                                </button>
+                              </div>
+                            </div>
+
+                            <button 
+                              onClick={handleEndMedicSession}
+                              className="w-full bg-red-650 hover:bg-red-600 text-white py-3 rounded-2xl text-[11px] font-black uppercase text-center transition-all shadow-md active:scale-95"
+                            >
+                              FINALIZAR TELECONSULTA MÉDICA
+                            </button>
+                          </div>
+                        )}
+
+                        {/* Doctor Idle Panel */}
+                        {medicState === 'idle' && isMedicOnline && (
+                          <div className="bg-slate-900/60 border border-slate-800 p-8 rounded-3xl text-center space-y-4 animate-fade-in">
+                            <div className="flex justify-center py-4">
+                              <div className="w-32 h-32 rounded-full border border-slate-800 flex items-center justify-center relative overflow-hidden">
+                                <div className="absolute inset-2 rounded-full border border-slate-800/50 flex items-center justify-center">
+                                  <div className="absolute inset-4 rounded-full border border-slate-800/20" />
+                                </div>
+                                <div className="absolute w-full h-full animate-sweep origin-center bg-gradient-to-tr from-emerald-500/15 to-transparent pr-12 rounded-full" />
+                                <span className="text-3xl text-slate-400 select-none z-10 shrink-0">👨🏼‍⚕️</span>
+                              </div>
+                            </div>
+                            <h4 className="text-xs font-bold text-white uppercase text-slate-400">Expediente Médico En Línea</h4>
+                            <p className="text-[11px] text-slate-500 px-4">
+                              Preparado para teleconsultas urgentes, soporte primario y atención médica en vivo de SecureFlow.
+                            </p>
+                          </div>
+                        )}
+                        {medicState === 'idle' && !isMedicOnline && (
+                          <div className="bg-slate-900 border border-slate-800 p-8 rounded-3xl text-center space-y-3">
+                            <span className="text-4xl block opacity-40 animate-pulse">💤</span>
+                            <h4 className="text-xs font-black text-slate-400 uppercase">Turno Pausado</h4>
+                            <p className="text-[11px] text-slate-500">
+                              Estás fuera de línea. Activa tu disponibilidad para atender pacientes.
+                            </p>
+                          </div>
+                        )}
+                      </div>
+                    )}
+
+                    {medicTab === 'agent' && (
+                      <div className="flex flex-col h-full bg-slate-950 rounded-2xl">
+                        <div className="flex-1 p-3 space-y-3 overflow-y-auto max-h-[300px] scrollbar-thin">
+                          {medicAgentMessages?.map((msg, idx) => (
+                            <div key={idx} className={`flex flex-col ${msg.sender === 'user' ? 'items-end' : 'items-start'}`}>
+                              <span className="text-[9px] text-slate-500 mb-0.5 font-mono uppercase">
+                                {msg.sender === 'bot' ? 'Asistente Clínico' : 'Tú'} • {msg.time}
+                              </span>
+                              <div className={`p-3 rounded-2xl text-xs max-w-[85%] leading-relaxed ${msg.sender === 'user' ? 'bg-emerald-600 text-white font-bold rounded-tr-none' : 'bg-slate-900 border border-slate-800 text-slate-200 rounded-tl-none'}`}>
+                                <p className="whitespace-pre-line">{msg.text}</p>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                        <div className="p-2 bg-slate-900/60 border-t border-slate-800/80 flex items-center gap-1.5 shrink-0 rounded-b-2xl">
+                          <input 
+                            type="text" 
+                            placeholder="Consultar posología, síntomas, diagnósticos..."
+                            value={medicAgentInput}
+                            onChange={(e) => setMedicAgentInput(e.target.value)}
+                            onKeyDown={(e) => { if (e.key === 'Enter') handleSendMedicAI(); }}
+                            className="flex-1 bg-slate-950 border border-slate-800 rounded-xl px-3 py-1.5 text-xs text-white focus:outline-none focus:border-emerald-500"
+                          />
                           <button 
-                            onClick={() => {
-                              setIsMedicOnline(!isMedicOnline);
-                              triggerPush('🏥 Telemedicina Guardia', isMedicOnline ? 'Doctor desconectado de guardia.' : 'Especialista en guardia de teleconsulta activa.');
-                            }}
-                            className={`px-4 py-1.5 rounded-xl text-xs font-black tracking-wide ${isMedicOnline ? 'bg-emerald-500 text-slate-950' : 'bg-slate-800 text-slate-300'}`}
+                            onClick={handleSendMedicAI}
+                            className="p-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white transition-all active:scale-95"
                           >
-                            {isMedicOnline ? 'ONLINE' : 'DESACTIVADO'}
+                            <Send className="w-3.5 h-3.5" />
                           </button>
                         </div>
                       </div>
+                    )}
 
-                      {/* Active Video consultation proposal block */}
-                      {medicState === 'calling' && activeMedicEmergency && (
-                        <div className="bg-slate-900 border border-emerald-900/40 p-4 rounded-3xl space-y-4">
-                          <div>
-                            <span className="text-[9px] bg-emerald-500/10 text-emerald-400 font-bold uppercase tracking-widest px-1.5 py-0.5 rounded">
-                              📞 SOLICITUD DE VIDEO CONSULTA TRIAJE
-                            </span>
-                            <h4 className="text-sm font-black mt-2 text-white">Paciente: {activeMedicEmergency.citizenName}</h4>
-                            <p className="text-[11px] text-slate-400 mt-1">
-                              Comuníquese primero por chat técnico para registrar síntomas básicos, luego presione Connect para establecer Daily.co en vivo.
-                            </p>
-                          </div>
-
-                          {/* Chat Box with Patient BEFORE video if desired */}
-                          <div className="space-y-2 bg-slate-950 p-2.5 rounded-2xl border border-slate-800">
-                            <span className="text-[8px] text-slate-500 font-bold uppercase block font-mono">Chat Preliminar de Triaje</span>
-                            <div className="max-h-32 overflow-y-auto space-y-2">
-                              {medicMessages.map((msg: any, idx: number) => (
-                                <div key={idx} className={`text-[11px] ${msg.sender === 'driver' ? 'text-emerald-400 text-right' : 'text-slate-300'}`}>
-                                  <span className="font-bold">{msg.sender === 'driver' ? 'Tú (Médico)' : 'Paciente'}: </span>
-                                  {msg.text}
-                                </div>
-                              ))}
-                            </div>
-                            <div className="flex gap-1.5 pt-1 border-t border-white/5">
-                              <input 
-                                type="text"
-                                value={medicChatInput}
-                                onChange={(e) => setMedicChatInput(e.target.value)}
-                                onKeyDown={(e) => { if (e.key === 'Enter') handleSendMedicMessage('driver'); }}
-                                placeholder="Escribe al paciente..."
-                                className="flex-1 bg-slate-900 border border-slate-800/80 rounded-lg px-2 py-1 text-[11px] text-white focus:outline-none"
-                              />
-                              <button 
-                                onClick={() => handleSendMedicMessage('driver')}
-                                className="bg-emerald-600 text-slate-950 px-3 py-1 rounded-lg text-[10px] font-bold"
-                              >
-                                Enviar
-                              </button>
-                            </div>
-                          </div>
-
-                          <button 
-                            onClick={async () => {
-                              setMedicState('active');
-                              triggerPush('📹 Sala Telemédica', 'Consulta iniciada. Estableciendo transmisión de video bidireccional...');
-                              try {
-                                await supabase
-                                  .from('emergencias_activas')
-                                  .update({ 
-                                    estado: 'activa',
-                                    abogado_id: sessionUser?.id || null
-                                  })
-                                  .eq('id', activeMedicEmergency.id);
-                              } catch (e) {
-                                console.error(e);
-                              }
-                            }}
-                            className="w-full bg-emerald-600 hover:bg-emerald-500 text-slate-950 py-2.5 rounded-xl text-xs font-black uppercase text-center transition-all shadow-md"
-                          >
-                            🏥 CONECTAR CON PACIENTE EN VIVO
-                          </button>
+                    {medicTab === 'history' && (
+                      <div className="space-y-3">
+                        <div className="p-4 bg-gradient-to-tr from-emerald-600 to-emerald-500 rounded-2xl text-slate-950 text-center shadow-md">
+                          <span className="text-[10px] font-bold uppercase tracking-widest block">Honorarios Acumulados</span>
+                          <h3 className="text-2xl font-black mt-1">$ {totalMedicEarnings.toFixed(2)} USD</h3>
+                          <p className="text-[9px] font-bold uppercase tracking-wider block mt-0.5">Saldo Neto Retirable</p>
                         </div>
-                      )}
 
-                      {/* Active Consulting Stream Frame */}
-                      {medicState === 'active' && activeMedicEmergency && (
-                        <div className="p-4 bg-slate-900 border border-slate-800 rounded-3xl space-y-4">
-                          <div className="flex justify-between items-center bg-emerald-950/20 p-2 rounded-xl border border-emerald-900/10">
-                            <span className="text-[10px] text-emerald-400 font-bold flex items-center gap-1">
-                              <span className="w-1.5 h-1.5 bg-emerald-400 rounded-full animate-ping" />
-                              SALA CLÍNICA SECUREFLOW N° {activeMedicEmergency.id.substring(0, 8).toUpperCase()}
-                            </span>
-                            <span className="text-[10px] text-slate-500">Paciente: {activeMedicEmergency.citizenName}</span>
-                          </div>
-
-                          {/* 1. Real-world Daily.co Iframe consulting */}
-                          <div className="relative h-48 bg-slate-950 border border-slate-800 rounded-2xl overflow-hidden flex flex-col justify-stretch">
-                            <iframe 
-                              src="https://iframe.daily.co/secureflow-telemedicina-guardia" 
-                              allow="camera; microphone; autofocus; fullscreen" 
-                              className="flex-1 w-full border-0" 
-                              title="Daily.co Doctor Consultation Room"
-                            />
-                            <div className="absolute top-2 left-2 bg-black/60 backdrop-blur px-2 py-1 rounded text-[8px] text-white pointer-events-none border border-white/5">
-                              🔴 EN VIVO - CANAL DE TELEMEDICINA
-                            </div>
-                          </div>
-
-                          {/* 2. Doctor Asistente Clínico AI (Gemini) */}
-                          <div className="p-3 bg-indigo-950/20 border border-indigo-900/40 rounded-2xl space-y-2">
-                            <div className="flex items-center gap-1.5">
-                              <span className="text-xs">🩺</span>
-                              <span className="text-[10px] uppercase font-black text-indigo-400">Asistente Clínico AI de Guardia (COPD / Sintomatología)</span>
-                            </div>
-                            <div className="max-h-24 overflow-y-auto bg-slate-950 p-2.5 rounded-xl text-[10px] space-y-1 font-mono text-slate-300">
-                              {medicAgentMessages.map((m, i) => (
-                                <div key={i}>
-                                  <strong className="text-indigo-400">{m.sender === 'user' ? 'Tú : ' : 'AI : '}</strong>
-                                  {m.text}
+                        <div className="space-y-2">
+                          <span className="text-[10px] text-slate-400 uppercase tracking-widest font-bold">Bitácora de Consultas</span>
+                          
+                          {medicHistory?.length > 0 ? (
+                            medicHistory?.map((item, idx) => (
+                              <div key={item.id || idx} className="p-3 bg-slate-900/60 border border-slate-800 rounded-xl flex justify-between items-center text-xs">
+                                <div>
+                                  <h5 className="font-bold text-white uppercase">Consulta #{item.servicio_id?.substring(0,8) || 'N/A'}</h5>
+                                  <p className="text-[10px] text-slate-400">
+                                    {item.created_at ? new Date(item.created_at).toLocaleDateString('es-VE', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : 'Reciente'}
+                                  </p>
                                 </div>
-                              ))}
+                                <span className="font-mono text-emerald-400 font-bold">
+                                  +${Number(item.ganancia_profesional || 0).toFixed(2)}
+                                </span>
+                              </div>
+                            ))
+                          ) : (
+                            <div className="p-4 bg-slate-900/30 border border-dashed border-slate-800/80 rounded-xl text-center text-[11px] text-slate-500 font-medium">
+                              Aún no hay consultas registradas
                             </div>
-                            <div className="flex gap-1.5">
-                              <input 
-                                type="text"
-                                value={medicAgentInput}
-                                onChange={e => setMedicAgentInput(e.target.value)}
-                                onKeyDown={e => { if (e.key === 'Enter') handleSendMedicAI(); }}
-                                placeholder="Consulta diagnósticos diferenciales o dosis farmacéuticas de guardia..."
-                                className="flex-1 bg-slate-950 border border-slate-800 rounded-lg px-2 py-1.5 text-[10px] text-white focus:outline-none"
-                              />
-                              <button 
-                                onClick={handleSendMedicAI}
-                                className="px-3 bg-indigo-650 text-white font-bold text-[9px] rounded-lg focus:outline-none"
-                              >
-                                Preguntar
-                              </button>
-                            </div>
-                          </div>
-
-                          {/* 3. Pre-call/post-call chat block */}
-                          <div className="space-y-1 bg-slate-950 p-2.5 rounded-2xl border border-slate-800">
-                            <span className="text-[8px] text-slate-500 font-bold uppercase block font-mono">Mensajes Paciente</span>
-                            <div className="max-h-28 overflow-y-auto space-y-2 p-1">
-                              {medicMessages.map((msg: any, idx: number) => (
-                                <div key={idx} className={`text-[11px] ${msg.sender === 'driver' ? 'text-emerald-400 text-right' : 'text-slate-300'}`}>
-                                  <span className="font-bold">{msg.sender === 'driver' ? 'Tú (Médico)' : 'Paciente'}: </span>
-                                  {msg.text}
-                                </div>
-                              ))}
-                            </div>
-                            <div className="flex gap-1.5 pt-1.5 border-t border-white/5">
-                              <input 
-                                type="text"
-                                value={medicChatInput}
-                                onChange={(e) => setMedicChatInput(e.target.value)}
-                                onKeyDown={(e) => { if (e.key === 'Enter') handleSendMedicMessage('driver'); }}
-                                placeholder="Escribe al paciente..."
-                                className="flex-1 bg-slate-900 border border-slate-800/80 rounded-lg px-2 py-1.5 text-[11px] text-white focus:outline-none"
-                              />
-                              <button 
-                                onClick={() => handleSendMedicMessage('driver')}
-                                className="bg-emerald-600 text-slate-950 px-3 py-1 rounded-lg text-[10px] font-bold"
-                              >
-                                Enviar
-                              </button>
-                            </div>
-                          </div>
-
-                          <button 
-                            onClick={async () => {
-                              try {
-                                const { error: medUpdateErr } = await supabase
-                                  .from('emergencias_activas')
-                                  .update({ estado: 'finalizada' })
-                                  .eq('id', activeMedicEmergency.id);
-                                if (medUpdateErr) throw medUpdateErr;
-                              } catch (e) {
-                                console.error(e);
-                              }
-                              setMedicState('idle');
-                              setActiveMedicEmergency(null);
-                              showMaterialAlert('🏥 Consulta Concluida', 'Sesión telemédica terminada. Diagnóstico y receta encriptada enviados al expediente del paciente.');
-                            }}
-                            className="w-full bg-red-650 hover:bg-red-600 text-white py-2.5 rounded-2xl text-[11px] font-black uppercase text-center transition-all shadow-md"
-                          >
-                            FINALIZAR TELECONSULTA MEDICA
-                          </button>
+                          )}
                         </div>
-                      )}
+                      </div>
+                    )}
+                  </div>
 
-                      {/* Doctor Idle Panel */}
-                      {medicState === 'idle' && (
-                        <div className="bg-slate-900 border border-slate-800 p-8 rounded-3xl text-center space-y-3">
-                          <span className="text-3xl">👨🏼‍⚕️</span>
-                          <h4 className="text-xs font-bold text-white uppercase text-slate-400">Expediente Médico</h4>
-                          <p className="text-[10px] text-slate-500">
-                            Preparado para teleconsultas urgentes de triaje integral, soporte primario y resguardo de salud de SecureFlow.
-                          </p>
-                        </div>
-                      )}
-                    </div>
+                  {/* Android style medic bottom nav */}
+                  <div className="h-14 bg-slate-900 border-t border-slate-800/60 shrink-0 flex justify-around items-center px-4">
+                    <button 
+                      onClick={() => setMedicTab('guardia')}
+                      className={`flex flex-col items-center gap-0.5 ${medicTab === 'guardia' ? 'text-emerald-500 font-bold' : 'text-slate-500'}`}
+                    >
+                      <Heart className="w-5 h-5" />
+                      <span className="text-[9px] uppercase">Guardia</span>
+                    </button>
+                    
+                    <button 
+                      onClick={() => setMedicTab('agent')}
+                      className={`flex flex-col items-center gap-0.5 ${medicTab === 'agent' ? 'text-emerald-500 font-bold' : 'text-slate-500'}`}
+                    >
+                      <Activity className="w-5 h-5" />
+                      <span className="text-[9px] uppercase">Asistente AI</span>
+                    </button>
+
+                    <button 
+                      onClick={() => setMedicTab('history')}
+                      className={`flex flex-col items-center gap-0.5 ${medicTab === 'history' ? 'text-emerald-500 font-bold' : 'text-slate-500'}`}
+                    >
+                      <DollarSign className="w-5 h-5" />
+                      <span className="text-[9px] uppercase">Ganancias</span>
+                    </button>
                   </div>
                 </div>
               )}

@@ -621,13 +621,8 @@ export default function App() {
     };
     fetchConfigTarifas();
   }, []);
-<<<<<<< HEAD
   const [towDriverCoords, setTowDriverCoords] = useState<{lat: number, lng: number}>({lat: 0, lng: 0});
   const [citizenCoords, setCitizenCoords] = useState<{lat: number, lng: number}>({lat: 0, lng: 0});
-=======
-  const [towDriverCoords, setTowDriverCoords] = useState<{lat: number, lng: number}>({lat: 10.4900, lng: -66.9100});
-  const [citizenCoords, setCitizenCoords] = useState<{lat: number, lng: number}>({lat: 10.4850, lng: -66.9030});
->>>>>>> f68308996d3c85a5177b29f3c22c44aa3ff0af2c
   const [towMessages, setTowMessages] = useState<Message[]>([]);
   const [towChatInput, setTowChatInput] = useState('');
   const [driverChatInput, setDriverChatInput] = useState('');
@@ -1204,17 +1199,10 @@ export default function App() {
         if (activeList && activeList.length > 0) {
           const assist = activeList[0];
           
-<<<<<<< HEAD
           let dName = 'Operador Asignado';
           let dPhone = 'No phone';
           let gId = assist.gruero_id;
           let vPlate = 'Por Asignar';
-=======
-          let dName = 'Carlos Ruiz';
-          let dPhone = 'No phone';
-          let gId = assist.gruero_id;
-          let vPlate = 'A92B45X';
->>>>>>> f68308996d3c85a5177b29f3c22c44aa3ff0af2c
           
           if (gId) {
             const { data: grueroRow } = await supabase
@@ -1225,11 +1213,7 @@ export default function App() {
             if (active && grueroRow) {
               dName = grueroRow.nombre_completo;
               dPhone = grueroRow.telefono;
-<<<<<<< HEAD
               vPlate = grueroRow.placa_vehiculo || 'Por Asignar';
-=======
-              vPlate = grueroRow.placa_vehiculo || 'A92B45X';
->>>>>>> f68308996d3c85a5177b29f3c22c44aa3ff0af2c
             }
           }
 
@@ -1285,7 +1269,6 @@ export default function App() {
     if (activeDevice !== 'citizen' || !activeTowJob) return;
 
     let active = true;
-<<<<<<< HEAD
 
 const checkTowStatusUpdate = async (updatedObj?: any) => {
 
@@ -1325,44 +1308,6 @@ const checkTowStatusUpdate = async (updatedObj?: any) => {
               drPhone = grueroRow.telefono || drPhone;
               vPlate = grueroRow.placa_vehiculo || vPlate;
             }
-=======
-
-    const checkTowStatusUpdate = async (updatedObj?: any) => {
-      try {
-        let updated = updatedObj;
-        if (!updated) {
-          const { data, error } = await supabase
-            .from('asistencias_viales')
-            .select('*')
-            .eq('id', activeTowJob.id)
-            .maybeSingle();
-
-          if (!error && data) {
-            updated = data;
-          }
-        }
-
-        if (!updated) return;
-
-        if (updated.estado === 'activa' || updated.estado === 'en_progreso' || updated.estado === 'aceptado') {
-          setTowState('dispatched');
-          setCitizenTab('home'); // Permanently activate tracking view map instantly
-          
-          let drName = updated.driverName || 'Carlos Ruiz';
-          let drPhone = updated.driverPhone || 'No phone';
-          let vPlate = updated.vehiclePlate || 'A92B45X';
-
-          const { data: grueroRow } = await supabase
-            .from('grueros')
-            .select('nombre_completo, telefono, placa_vehiculo')
-            .eq('id', updated.gruero_id)
-            .maybeSingle();
-
-          if (grueroRow) {
-            drName = grueroRow.nombre_completo || drName;
-            drPhone = grueroRow.telefono || drPhone;
-            vPlate = grueroRow.placa_vehiculo || vPlate;
->>>>>>> f68308996d3c85a5177b29f3c22c44aa3ff0af2c
           }
 
           if (active) {
@@ -1533,7 +1478,6 @@ const checkTowStatusUpdate = async (updatedObj?: any) => {
             .maybeSingle();
 
           if (unit && active) {
-<<<<<<< HEAD
             const dLat = Number(unit.lat_actual);
             const dLng = Number(unit.lng_actual);
             
@@ -1541,18 +1485,6 @@ const checkTowStatusUpdate = async (updatedObj?: any) => {
               setCraneUnitState({ lat_actual: dLat, lng_actual: dLng });
               setTowDriverCoords({ lat: dLat, lng: dLng });
             }
-=======
-            const dLat = Number(unit.lat_actual) || 10.4900;
-            const dLng = Number(unit.lng_actual) || -66.9100;
-            setCraneUnitState({
-              lat_actual: dLat,
-              lng_actual: dLng
-            });
-            setTowDriverCoords({
-              lat: dLat,
-              lng: dLng
-            });
->>>>>>> f68308996d3c85a5177b29f3c22c44aa3ff0af2c
           }
 
           if (!channel && active) {
@@ -1568,25 +1500,12 @@ const checkTowStatusUpdate = async (updatedObj?: any) => {
                 },
                 (payload) => {
                   if (active && payload.new) {
-<<<<<<< HEAD
                     const latVal = Number(payload.new.lat_actual);
                     const lngVal = Number(payload.new.lng_actual);
                     if (!isNaN(latVal) && !isNaN(lngVal) && latVal !== 0 && lngVal !== 0) {
                       setCraneUnitState({ lat_actual: latVal, lng_actual: lngVal });
                       setTowDriverCoords({ lat: latVal, lng: lngVal });
                     }
-=======
-                    const latVal = Number(payload.new.lat_actual) || 10.4900;
-                    const lngVal = Number(payload.new.lng_actual) || -66.9100;
-                    setCraneUnitState({
-                      lat_actual: latVal,
-                      lng_actual: lngVal
-                    });
-                    setTowDriverCoords({
-                      lat: latVal,
-                      lng: lngVal
-                    });
->>>>>>> f68308996d3c85a5177b29f3c22c44aa3ff0af2c
                   }
                 }
               )
@@ -1613,8 +1532,6 @@ const checkTowStatusUpdate = async (updatedObj?: any) => {
       }
     };
   }, [towState, activeTowJob?.id, activeTowJob?.gruero_id, activeVialAssist?.estado, activeVialAssist?.gruero_id]);
-<<<<<<< HEAD
-=======
 
   // Driver subscribes to and polls Citizen location from DB in real-time
   useEffect(() => {
@@ -1688,543 +1605,6 @@ const checkTowStatusUpdate = async (updatedObj?: any) => {
       clearInterval(interval);
       if (channel) {
         supabase.removeChannel(channel);
-      }
-    };
-  }, [activeDevice, towState, activeTowJob?.id]);
->>>>>>> f68308996d3c85a5177b29f3c22c44aa3ff0af2c
-
-  // Driver subscribes to and polls Citizen location from DB in real-time
-  useEffect(() => {
-    if (activeDevice !== 'driver' || towState !== 'dispatched' || !activeTowJob) return;
-
-    let active = true;
-    let channel: any = null;
-
-<<<<<<< HEAD
-    const fetchCitizenLocation = async () => {
-      try {
-        const { data: assist, error } = await supabase
-          .from('asistencias_viales')
-          .select('ubicacion_origen_lat, ubicacion_origen_lng')
-          .eq('id', activeTowJob.id)
-          .maybeSingle();
-
-        if (error || !assist) return;
-
-        if (active) {
-          const lat = Number(assist.ubicacion_origen_lat);
-          const lng = Number(assist.ubicacion_origen_lng);
-          if (!isNaN(lat) && !isNaN(lng)) {
-            setActiveTowJob(prev => prev ? {
-              ...prev,
-              latitude: lat,
-              longitude: lng
-            } : null);
-          }
-        }
-      } catch (err) {
-        console.error("Error in driver fetching citizen coordinates:", err);
-      }
-    };
-
-    fetchCitizenLocation();
-
-    // Subscribe to UPDATE events on asistencias_viales
-    channel = supabase
-      .channel(`driver-citizen-track-${activeTowJob.id}`)
-=======
-    return () => {
-      supabase.removeChannel(channel);
-    };
-  }, [activeDevice, activeEmergency?.id]);
-
-  // Real-time listener for the citizen to sync the doctor teleconsultation status and chat messages
-  useEffect(() => {
-    if (activeDevice !== 'citizen' || !activeMedicEmergency) return;
-
-    const channel = supabase
-      .channel(`citizen-medic-${activeMedicEmergency.id}`)
-      .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'emergencias_activas', filter: `id=eq.${activeMedicEmergency.id}` }, (payload) => {
-        const updated = payload.new;
-        if (updated.estado === 'active' || updated.estado === 'activa') {
-          setMedicState('active');
-          setIsMedicWindowOpen(true);
-          setIsMedicDailyCoActive(true);
-          triggerPush('🏥 Doctor Conectado', 'El médico de guardia ha aceptado tu caso y ya está conectado.');
-        } else if (updated.estado === 'completed' || updated.estado === 'resuelta') {
-          setMedicState('idle');
-          setActiveMedicEmergency(null);
-          setIsMedicWindowOpen(false);
-          const rate = Number(updated.tarifa_aplicada) || 20.00;
-          setCitizenBalance(b => Math.max(0, b - rate));
-          showMaterialAlert('🩺 Consulta Concluida', 'El médico de guardia ha finalizado la sesión de teleconsulta.');
-          channel.unsubscribe();
-        }
-      })
-      .subscribe();
-
-    return () => {
-      supabase.removeChannel(channel);
-    };
-  }, [activeDevice, activeMedicEmergency?.id]);
-
-  // Real-time listener for the citizen to sync the ambulance dispatch status and chat messages
-  useEffect(() => {
-    if (activeDevice !== 'citizen' || !activeAmbulanceJob) return;
-
-    const channel = supabase
-      .channel(`citizen-ambulance-${activeAmbulanceJob.id}`)
-      .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'emergencias_activas', filter: `id=eq.${activeAmbulanceJob.id}` }, (payload) => {
-        const updated = payload.new;
-        if (updated.estado === 'dispatched' || updated.estado === 'activa') {
-          setAmbulanceState('dispatched');
-          setIsAmbulanceWindowOpen(true);
-          triggerPush('🚑 Auxilio en Camino', 'La unidad de paramédicos de resguardo ha iniciado ruta oficial hacia tu ubicación.');
-        } else if (updated.estado === 'completed' || updated.estado === 'resuelta') {
-          setAmbulanceState('idle');
-          setActiveAmbulanceJob(null);
-          setIsAmbulanceWindowOpen(false);
-          const rate = Number(updated.tarifa_aplicada) || 35.00;
-          setCitizenBalance(b => Math.max(0, b - rate));
-          showMaterialAlert('🚑 Traslado Concluido', 'La ambulancia ha finalizado el caso.');
-          channel.unsubscribe();
-        }
-      })
-      .subscribe();
-
-    return () => {
-      supabase.removeChannel(channel);
-    };
-  }, [activeDevice, activeAmbulanceJob?.id]);
-
-  // Real-time listener and synchronizer for Tow Truck Driver Panel using exclusive public.asistencias_viales
-  useEffect(() => {
-    if (activeDevice !== 'driver' || !sessionUser?.id) return;
-
-    let active = true;
-    let channel: any = null;
-
-    const handleIncomingPendiente = async (assist: any) => {
-      try {
-        if (!active) return;
-        const { data: userData } = await supabase
-          .from('usuarios')
-          .select('nombre_completo, contacto_emergencia_1_telefono')
-          .eq('id', assist.ciudadano_id)
-          .maybeSingle();
-
-        if (!active) return;
-
-        const cName = userData?.nombre_completo || 'Asegurado';
-        const cPhone = userData?.contacto_emergencia_1_telefono || 'No phone';
-
-        const destCoords = getCoordsFromText(assist.ubicacion_destino_texto || 'Plaza Venezuela');
-        const calculatedKm = calculateDistanceInKm(
-          Number(assist.ubicacion_origen_lat),
-          Number(assist.ubicacion_origen_lng),
-          destCoords.lat,
-          destCoords.lng
-        );
-
-        setTowState('proposed');
-        setActiveTowJob({
-          id: assist.id,
-          citizenName: cName,
-          citizenPhone: cPhone,
-          status: 'pending',
-          latitude: Number(assist.ubicacion_origen_lat),
-          longitude: Number(assist.ubicacion_origen_lng),
-          price: Number(assist.costo_total),
-          distance: Math.round(calculatedKm * 1000)
-        });
-        setActiveVialAssist(assist);
-      } catch (err) {
-        console.error("Error setting proposed job from insert payload:", err);
-      }
-    };
-
-    const syncDriverTowState = async () => {
-      try {
-        // First resolve actual gruero_id of logged-in user
-        const { data: qGruero } = await supabase
-          .from('grueros')
-          .select('id')
-          .eq('auth_id', sessionUser.id)
-          .maybeSingle();
-
-        if (!active) return;
-        const grueroId = qGruero?.id;
-        if (!grueroId) {
-          console.warn("Operator profile not found yet.");
-          return;
-        }
-
-        // AUTO-INITIALIZE Crane Coords to Caracas if unassigned / 0 in database to prevent multi-thousand KM issues
-        try {
-          const { data: unitRow } = await supabase
-            .from('unidades_grua')
-            .select('id, lat_actual, lng_actual')
-            .eq('gruero_id', grueroId)
-            .maybeSingle();
-
-          if (unitRow) {
-            const latVal = Number(unitRow.lat_actual);
-            const lngVal = Number(unitRow.lng_actual);
-            if (isNaN(latVal) || isNaN(lngVal) || latVal === 0 || lngVal === 0) {
-              await supabase
-                .from('unidades_grua')
-                .update({
-                  lat_actual: 10.4900,
-                  lng_actual: -66.9100,
-                  estado: 'disponible'
-                })
-                .eq('id', unitRow.id);
-            }
-          }
-        } catch (initErr) {
-          console.error("Error auto-initializing driver coords to Caracas:", initErr);
-        }
-
-        // Check if we have an active ongoing tow job in asistencias_viales
-        const { data: activeList } = await supabase
-          .from('asistencias_viales')
-          .select('*')
-          .in('estado', ['activa', 'en_progreso'])
-          .eq('gruero_id', grueroId);
-
-        if (!active) return;
-
-        if (activeList && activeList.length > 0) {
-          const assist = activeList[0];
-          const { data: userData } = await supabase
-            .from('usuarios')
-            .select('nombre_completo, contacto_emergencia_1_telefono')
-            .eq('id', assist.ciudadano_id)
-            .maybeSingle();
-
-          if (!active) return;
-
-          const cName = userData?.nombre_completo || 'Asegurado';
-          const cPhone = userData?.contacto_emergencia_1_telefono || 'No phone';
-
-          setTowState('dispatched');
-          setActiveTowJob({
-            id: assist.id,
-            citizenName: cName,
-            citizenPhone: cPhone,
-            status: 'en_route',
-            latitude: Number(assist.ubicacion_origen_lat),
-            longitude: Number(assist.ubicacion_origen_lng),
-            price: Number(assist.costo_total),
-            distance: assist.distancia_metros || 5400
-          });
-          setActiveVialAssist(assist);
-        } else {
-          // Check for any pending dispatch assigned in DB to this driver (for socket failure bypass)
-          const { data: pendingList } = await supabase
-            .from('asistencias_viales')
-            .select('*')
-            .eq('estado', 'pendiente');
-
-          if (active && pendingList && pendingList.length > 0) {
-            const assist = pendingList[0];
-            const { data: userData } = await supabase
-              .from('usuarios')
-              .select('nombre_completo, contacto_emergencia_1_telefono')
-              .eq('id', assist.ciudadano_id)
-              .maybeSingle();
-
-            if (active) {
-              const cName = userData?.nombre_completo || 'Asegurado';
-              const cPhone = userData?.contacto_emergencia_1_telefono || 'No phone';
-
-              const destCoords = getCoordsFromText(assist.ubicacion_destino_texto || 'Plaza Venezuela');
-              const calculatedKm = calculateDistanceInKm(
-                Number(assist.ubicacion_origen_lat),
-                Number(assist.ubicacion_origen_lng),
-                destCoords.lat,
-                destCoords.lng
-              );
-
-              setTowState('proposed');
-              setActiveTowJob({
-                id: assist.id,
-                citizenName: cName,
-                citizenPhone: cPhone,
-                status: 'pending',
-                latitude: Number(assist.ubicacion_origen_lat),
-                longitude: Number(assist.ubicacion_origen_lng),
-                price: Number(assist.costo_total),
-                distance: assist.distancia_metros || Math.round(calculatedKm * 1000)
-              });
-              setActiveVialAssist(assist);
-            }
-          } else {
-            // No active or pending job found for this operator
-            // Verify if we are currently dispatched to prevent race conditions or database lag resetting state to idle
-            if (towStateRef.current === 'dispatched' && activeTowJobRef.current) {
-              const { data: currentJob } = await supabase
-                .from('asistencias_viales')
-                .select('estado')
-                .eq('id', activeTowJobRef.current.id)
-                .maybeSingle();
-              
-              if (currentJob && (currentJob.estado === 'completado' || currentJob.estado === 'cancelado')) {
-                setTowState('idle');
-                setActiveTowJob(null);
-                setActiveVialAssist(null);
-              }
-              // Preserve the dispatched state if the database does not explicitly confirm cancellation/conclusion
-              return;
-            }
-
-            // Only preserve state if it was proposed by a real-time INSERT event.
-            if (towStateRef.current !== 'proposed') {
-              setTowState('idle');
-              setActiveTowJob(null);
-              setActiveVialAssist(null);
-            }
-          }
-        }
-      } catch (err) {
-        console.error("Error syncing driver tow status:", err);
-      }
-    };
-
-    // Run synchronization immediately for active ongoing services
-    syncDriverTowState();
-
-    // Setup Supabase Real-Time subscription for asistencias_viales table
-    channel = supabase
-      .channel('driver-vial-assist-channel')
->>>>>>> f68308996d3c85a5177b29f3c22c44aa3ff0af2c
-      .on(
-        'postgres_changes',
-        {
-          event: 'UPDATE',
-          schema: 'public',
-          table: 'asistencias_viales',
-          filter: `id=eq.${activeTowJob.id}`
-        },
-        (payload) => {
-<<<<<<< HEAD
-          if (active && payload.new) {
-            const lat = Number(payload.new.ubicacion_origen_lat);
-            const lng = Number(payload.new.ubicacion_origen_lng);
-            if (!isNaN(lat) && !isNaN(lng)) {
-              setActiveTowJob(prev => prev ? {
-                ...prev,
-                latitude: lat,
-                longitude: lng
-              } : null);
-=======
-          if (active && payload.new && payload.new.estado === 'pendiente') {
-            handleIncomingPendiente(payload.new);
-          }
-        }
-      )
-      .on(
-        'postgres_changes',
-        { event: 'UPDATE', schema: 'public', table: 'asistencias_viales' },
-        (payload) => {
-          if (active && payload.new) {
-            if (payload.new.estado === 'activa' && payload.new.gruero_id) {
-              // Resync state if it was activated
-              syncDriverTowState();
-            } else if (payload.new.estado === 'completado' || payload.new.estado === 'cancelado') {
-              if (activeVialAssist && payload.new.id === activeVialAssist.id) {
-                setTowState('idle');
-                setActiveTowJob(null);
-                setActiveVialAssist(null);
-              }
->>>>>>> f68308996d3c85a5177b29f3c22c44aa3ff0af2c
-            }
-          }
-        }
-      )
-      .subscribe();
-
-<<<<<<< HEAD
-    // Polling fallback helper every 2.5 seconds
-    const interval = setInterval(() => {
-      if (active) fetchCitizenLocation();
-    }, 2500);
-=======
-    // Robust fast-polling backup to guarantee active state updates if WebSockets ever flicker
-    const interval = setInterval(() => {
-      if (active) {
-        syncDriverTowState();
-      }
-    }, 2000);
->>>>>>> f68308996d3c85a5177b29f3c22c44aa3ff0af2c
-
-    return () => {
-      active = false;
-      clearInterval(interval);
-      if (channel) {
-        supabase.removeChannel(channel);
-<<<<<<< HEAD
-=======
-      }
-    };
-  }, [activeDevice, sessionUser?.id]);
-
-  // REAL GEOLOCATION WATCH: Tracks and updates Citizen position in real-time
-  useEffect(() => {
-    if (activeDevice !== 'citizen') return;
-
-    if (!navigator.geolocation) {
-      console.warn("Geolocation is not supported by this browser.");
-      return;
-    }
-
-    const handleCoordsUpdate = async (lat: number, lng: number) => {
-      setCitizenCoords({ lat, lng });
-
-      // If tow job is active, update the databases' origen coordinates
-      const currentJobId = activeTowJob?.id || activeVialAssist?.id;
-      if (currentJobId) {
-        try {
-          await supabase
-            .from('asistencias_viales')
-            .update({
-              ubicacion_origen_lat: lat,
-              ubicacion_origen_lng: lng
-            })
-            .eq('id', currentJobId);
-        } catch (err) {
-          console.error("Error updating active asistencia coords:", err);
-        }
-      }
-    };
-
-    const watchId = navigator.geolocation.watchPosition(
-      (position) => {
-        handleCoordsUpdate(position.coords.latitude, position.coords.longitude);
-      },
-      (error) => {
-        console.warn("Error watching citizen position:", error);
-      },
-      { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 }
-    );
-
-    return () => {
-      navigator.geolocation.clearWatch(watchId);
-    };
-  }, [activeDevice, activeTowJob?.id, activeVialAssist?.id]);
-
-  // REAL GEOLOCATION WATCH: Tracks and updates Tow Driver position in real-time
-  useEffect(() => {
-    if (activeDevice !== 'driver' || !sessionUser?.id) return;
-
-    if (!navigator.geolocation) {
-      console.warn("Geolocation is not supported by this browser.");
-      return;
-    }
-
-    const handleDriverCoordsUpdate = async (lat: number, lng: number) => {
-      setTowDriverCoords({ lat, lng });
-      setCraneUnitState({ lat_actual: lat, lng_actual: lng });
-
-      try {
-        // Resolve the true grueros.id from public.grueros table where auth_id equals sessionUser.id
-        const { data: qGruero } = await supabase
-          .from('grueros')
-          .select('id')
-          .eq('auth_id', sessionUser.id)
-          .maybeSingle();
-
-        const actualGrueroId = qGruero?.id;
-        if (!actualGrueroId) {
-          console.warn("No registered gruero profile found for current driver auth user.");
-          return;
-        }
-
-        // Query if crane unit exists
-        const { data: craneUnit } = await supabase
-          .from('unidades_grua')
-          .select('*')
-          .eq('gruero_id', actualGrueroId)
-          .maybeSingle();
-
-        if (craneUnit) {
-          await supabase
-            .from('unidades_grua')
-            .update({
-              lat_actual: lat,
-              lng_actual: lng,
-              estado: 'disponible'
-            })
-            .eq('gruero_id', actualGrueroId);
-        } else {
-          await supabase
-            .from('unidades_grua')
-            .insert({
-              gruero_id: actualGrueroId,
-              lat_actual: lat,
-              lng_actual: lng,
-              estado: 'disponible'
-            });
-        }
-      } catch (err) {
-        console.error("Error syncing driver geolocation to DB:", err);
-      }
-    };
-
-    const watchId = navigator.geolocation.watchPosition(
-      (position) => {
-        handleDriverCoordsUpdate(position.coords.latitude, position.coords.longitude);
-      },
-      (error) => {
-        console.warn("Error watching driver position:", error);
-      },
-      { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 }
-    );
-
-    return () => {
-      navigator.geolocation.clearWatch(watchId);
-    };
-  }, [activeDevice, sessionUser?.id]);
-
-
-
-  // Real-time synchronization for Ambulance Paramedic Panel
-  useEffect(() => {
-    if (activeDevice !== 'ambulance') return;
-
-    const fetchCallingAmbulances = async () => {
-      const { data: callingData } = await supabase
-        .from('emergencias_activas')
-        .select('*')
-        .eq('estado', 'buscando');
-
-      const filteredAmbulance = callingData?.filter(e => e.sala_webrtc_url && e.sala_webrtc_url.includes('Ambulance')) || [];
-      if (filteredAmbulance.length > 0) {
-        const active = filteredAmbulance[0];
-        const { data: userData } = await supabase
-          .from('usuarios')
-          .select('nombre_completo, contacto_emergencia_1_telefono')
-          .eq('id', active.ciudadano_id)
-          .maybeSingle();
-
-        const cName = userData?.nombre_completo || 'Ciudadano';
-        const cPhone = userData?.contacto_emergencia_1_telefono || '';
-        const distance = 2100;
-
-        if (ambulanceState === 'idle') {
-          setAmbulanceState('proposed');
-          setActiveAmbulanceJob({
-            id: active.id,
-            citizenName: cName,
-            citizenPhone: cPhone,
-            latitude: Number(active.ubicacion_lat),
-            longitude: Number(active.ubicacion_lng),
-            price: Number(active.tarifa_aplicada),
-            distance: distance
-          });
-        }
-        return;
->>>>>>> f68308996d3c85a5177b29f3c22c44aa3ff0af2c
       }
     };
   }, [activeDevice, towState, activeTowJob?.id]);
@@ -3154,7 +2534,6 @@ const channel = supabase
     }, 2000);
   };
 
-<<<<<<< HEAD
 // Track Tow Truck proximity with the citizen in real-time
   useEffect(() => {
     // 1. CANDADO ANTI-CRASH: Solo se ejecuta si ambas latitudes existen
@@ -3201,34 +2580,6 @@ const channel = supabase
           }, 100);
 
           return [...prev, { 
-=======
-  // Track Tow Truck proximity with the citizen in real-time
-  useEffect(() => {
-    if (towState === 'dispatched' && activeTowJob) {
-      const distanceKm = calculateDistanceInKm(
-        towDriverCoords.lat,
-        towDriverCoords.lng,
-        citizenCoords.lat,
-        citizenCoords.lng
-      );
-      const distanceMeters = Math.round(distanceKm * 1000);
-
-      // Continuously update activeTowJob.distance based on real GPS coordinates
-      if (activeTowJob.distance !== distanceMeters) {
-        setActiveTowJob(prev => prev ? {
-          ...prev,
-          distance: distanceMeters
-        } : null);
-      }
-
-      // Auto-arrive if close enough (under 40 meters)
-      if (distanceMeters < 40) {
-        setTowState('completed');
-        triggerPush('🚜 Grúa en el Sitio', 'La unidad de asistencia vial ha llegado a tu ubicación en tiempo real.');
-        setTowMessages(m => {
-          if (m.some(msg => msg.text.includes('🏁 He llegado'))) return m;
-          return [...m, { 
->>>>>>> f68308996d3c85a5177b29f3c22c44aa3ff0af2c
             sender: 'driver', 
             text: '🏁 He llegado a tu ubicación exacta con la grúa. Estoy estacionado detrás de ti. Procedo a enganchar el vehículo.', 
             time: new Date().toLocaleTimeString('es-VE', { hour: '2-digit', minute: '2-digit', hour12: false })
@@ -3236,14 +2587,8 @@ const channel = supabase
         });
       }
     }
-<<<<<<< HEAD
   }, [towState, towDriverCoords.lat, towDriverCoords.lng, activeTowJob?.latitude, activeTowJob?.longitude]);
 // REAL GEOLOCATION WATCH: El Paramédico transmite su GPS real al Ciudadano
-=======
-  }, [towState, towDriverCoords.lat, towDriverCoords.lng, citizenCoords.lat, citizenCoords.lng]);
-
-  // Simulate Ambulance physical movement
->>>>>>> f68308996d3c85a5177b29f3c22c44aa3ff0af2c
   useEffect(() => {
     if (activeDevice !== 'ambulance' || ambulanceState !== 'dispatched' || !activeAmbulanceJob) return;
 
@@ -3613,45 +2958,32 @@ const channel = supabase
     
     const emerId = generateUUIDv4();
     
-    // Solicitamos la creación real de la sala dinámica directamente en Daily.co desde el frontend
+    // 1. URL de respaldo (Garantiza que la llamada NUNCA se caiga)
     let dailyUrlGenerated = `https://iframe.daily.co/secureflow-abogado-${emerId.toLowerCase()}`;
+    
     try {
-      const dailyResponse = await fetch('https://api.daily.co/v1/rooms', {
+      // 2. Intentamos pedirle la URL privada a tu servidor seguro n8n
+      const n8nResponse = await fetch('https://panel1.quickai.agency/webhook/crear-sala-webrtc', {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': 'Bearer 2d632b78894ae034f72f94e9abd129bdc7a2707741b7c92a4bdc9bd16fe3642a'
-        },
-        body: JSON.stringify({
-          properties: {
-            enable_chat: true,
-            start_video_off: false,
-            start_audio_off: false,
-            enable_recording: 'cloud'
-          }
-        })
+        headers: { 'Content-Type': 'application/json' }
       });
 
-      if (dailyResponse.ok) {
-        const dailyData = await dailyResponse.json();
-        if (dailyData.url) {
-          dailyUrlGenerated = dailyData.url;
-          console.log('[SOS WebRTC] Sala oficial de Daily.co creada con éxito:', dailyUrlGenerated);
+      if (n8nResponse.ok) {
+        const n8nData = await n8nResponse.json();
+        
+        // 3. CANDADO ANTI-ERRORES: Solo usa la de n8n si trae la palabra "daily.co"
+        if (n8nData && n8nData.url && typeof n8nData.url === 'string' && n8nData.url.includes('daily.co')) {
+          dailyUrlGenerated = n8nData.url;
+          console.log('[SOS] Sala privada obtenida de n8n:', dailyUrlGenerated);
         } else {
-          throw new Error('La API de Daily.co no devolvió la URL de la reunión.');
+          console.warn('[SOS] n8n devolvió un formato inválido. Usando URL de respaldo.');
         }
-      } else {
-        const errText = await dailyResponse.text();
-        throw new Error(`Código ${dailyResponse.status}: ${errText}`);
       }
     } catch (e: any) {
-      console.error('[SOS WebRTC ERROR] Error al conectar de forma directa con Daily.co:', e);
-      showMaterialAlert(
-        '⚠️ Configuración WebRTC Requerida',
-        `No se pudo crear una sala dinámica real directamente en Daily.co.\n\nDetalle: ${e.message}`
-      );
+      console.error('[SOS WebRTC ERROR] Servidor ocupado, usando respaldo automático:', e);
     }
 
+    // 4. Se crea la emergencia con la URL garantizada
     const newEmergency: Emergency = {
       id: emerId,
       citizenName: citizenProfile.name,
@@ -3811,16 +3143,18 @@ const channel = supabase
 
         triggerPush('🚑 Buscando Unidad', 'Rastreando la ambulancia más cercana a tu ubicación...');
         
-        let dailyUrlGenerated = `https://iframe.daily.co/secureflow-ambulancia-${emerId.toLowerCase()}`;
+    let dailyUrlGenerated = `https://iframe.daily.co/secureflow-ambulancia-${emerId.toLowerCase()}`;
+        
         try {
-          const dailyResponse = await fetch('https://api.daily.co/v1/rooms', {
+          // Llamada segura a n8n. Cero llaves expuestas en el celular.
+          const n8nResponse = await fetch('https://panel1.quickai.agency/webhook/crear-sala-webrtc', {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer 2d632b78894ae034f72f94e9abd129bdc7a2707741b7c92a4bdc9bd16fe3642a' },
-            body: JSON.stringify({ properties: { enable_chat: true, start_video_off: false, start_audio_off: false, enable_recording: 'cloud' } })
+            headers: { 'Content-Type': 'application/json' }
           });
-          if (dailyResponse.ok) {
-            const dailyData = await dailyResponse.json();
-            if (dailyData.url) dailyUrlGenerated = dailyData.url;
+          
+          if (n8nResponse.ok) {
+            const n8nData = await n8nResponse.json();
+            if (n8nData.url) dailyUrlGenerated = n8nData.url;
           }
         } catch (e) { console.error('[AMBULANCE WebRTC ERROR]', e); }
 
@@ -3840,7 +3174,6 @@ const channel = supabase
     );
   };
 
-<<<<<<< HEAD
   const handleFinalizeAmbulanceJob = async () => {
     if (!activeAmbulanceJob) return;
 
@@ -3883,63 +3216,34 @@ const channel = supabase
           try {
             setIsAuthLoading(true);
 
+            // 1. Marcar el viaje como finalizado
             const { error: ambUpdateErr } = await supabase
               .from('asistencias_ambulancias')
               .update({ estado: 'finalizada' })
               .eq('id', activeAmbulanceJob.id);
             if (ambUpdateErr) throw ambUpdateErr;
 
-            const { data: balanceRow } = await supabase
-              .from('saldos')
-              .select('creditos_disponibles')
-              .eq('usuario_id', citizenId)
-              .maybeSingle();
-
-            const newClientBal = Math.max(0, (balanceRow?.creditos_disponibles || 35.0) - calculatedPrice);
-            await supabase
-              .from('saldos')
-              .update({ creditos_disponibles: newClientBal })
-              .eq('usuario_id', citizenId);
-
-            setCitizenBalance(newClientBal);
-
-            const { data: profBalRow } = await supabase
-              .from('saldos_ambulancias')
-              .select('balance')
-              .eq('user_id', sessionUser?.id)
-              .maybeSingle();
-
-            const newProfBal = (profBalRow?.balance || 0.00) + driverReceives;
-
-           await supabase
-              .from('saldos_ambulancias')
-              .upsert({
-                user_id: sessionUser?.id,
-                balance: newProfBal,
-                updated_at: new Date().toISOString()
-              }, { onConflict: 'user_id' });
-
-            setAmbulanceBalanceClean(newProfBal);
-            setTotalAmbulanceEarnings(newProfBal); // <-- ACTUALIZA EL DASHBOARD DE INMEDIATO
-
-            // Resolución del ID real para que aparezca bien en el historial
-            const { data: usrRow } = await supabase.from('usuarios').select('id').eq('auth_id', sessionUser?.id).maybeSingle();
-            const aUsrId = usrRow?.id || sessionUser?.id;
-
-            await supabase.from('historial_comisiones').insert({
-              servicio_id: activeAmbulanceJob.id,
-              tipo_servicio: 'ambulancia',
-              profesional_id: aUsrId,
-              cliente_id: citizenId,
-              monto_cobrado: calculatedPrice,
-              ganancia_profesional: driverReceives,
-              comision_secureflow: platformFee
+            // === 🛡️ LA MAGIA DE SEGURIDAD: LLAMADA AL BACKEND ===
+            const { error: rpcError } = await supabase.rpc('procesar_cobro_ambulancia', {
+              p_asistencia_id: activeAmbulanceJob.id,
+              p_ciudadano_auth_id: citizenId,
+              p_paramedico_auth_id: sessionUser?.id,
+              p_monto_total: calculatedPrice,
+              p_ganancia: driverReceives,
+              p_comision: platformFee
             });
 
+            if (rpcError) throw rpcError;
+
+            // Actualizar vista local
+            setCitizenBalance(prev => Math.max(0, prev - calculatedPrice));
+            setAmbulanceBalanceClean(prev => prev + driverReceives);
+            setTotalAmbulanceEarnings(prev => prev + driverReceives);
+            
             setCompletedAmbulanceSessions(prev => prev + 1);
             setAmbulanceState('idle');
             setActiveAmbulanceJob(null);
-            showMaterialAlert('✅ Concluido', `Traslado completado de forma real. Se cargaron $${calculatedPrice.toFixed(2)} USD de la cuenta del afiliado.`);
+            showMaterialAlert('✅ Concluido', `Traslado completado de forma segura. Se cargaron $${calculatedPrice.toFixed(2)} USD de la cuenta del afiliado.`);
           } catch (e) {
             console.error(e);
             showMaterialAlert('❌ Error Grave', 'Error procesando transacciones reales en Supabase.');
@@ -3947,22 +3251,12 @@ const channel = supabase
             setIsAuthLoading(false);
           }
         }
-=======
-  // SecureFlow Telemedicine Video Consultation Request
-  const handleMedicRequest = () => {
-    const medicalFee = tariffs.medico?.tarifa_base ?? 20.00;
-    if (citizenBalance < medicalFee) {
-      showMaterialAlert(
-        '💰 Saldo Insuficiente',
-        `La tarifa reducida por telemedicina SOS con doctor de guardia es de $${medicalFee.toFixed(2)}. Tu saldo actual es de $${citizenBalance.toFixed(2)}. Por favor, recarga saldo presionando "Ver mi Saldo".`
->>>>>>> f68308996d3c85a5177b29f3c22c44aa3ff0af2c
       );
     } catch (err) {
       console.error(err);
       showMaterialAlert('❌ Error de Lectura', 'No se pudo conectar con la base de datos para calcular la tarifa.');
     }
   };
-
 
 
   
@@ -3987,15 +3281,17 @@ const channel = supabase
         triggerPush('🏥 Buscando Especialista', 'Esperando conexión segura con el médico de guardia...');
         
         let dailyUrlGenerated = `https://iframe.daily.co/secureflow-medico-${emerId.toLowerCase()}`;
+        
         try {
-          const dailyResponse = await fetch('https://api.daily.co/v1/rooms', {
+          // Llamada segura a n8n. Cero llaves expuestas en el celular.
+          const n8nResponse = await fetch('https://panel1.quickai.agency/webhook/crear-sala-webrtc', {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer 2d632b78894ae034f72f94e9abd129bdc7a2707741b7c92a4bdc9bd16fe3642a' },
-            body: JSON.stringify({ properties: { enable_chat: true, start_video_off: false, start_audio_off: false, enable_recording: 'cloud' } })
+            headers: { 'Content-Type': 'application/json' }
           });
-          if (dailyResponse.ok) {
-            const dailyData = await dailyResponse.json();
-            if (dailyData.url) dailyUrlGenerated = dailyData.url;
+          
+          if (n8nResponse.ok) {
+            const n8nData = await n8nResponse.json();
+            if (n8nData.url) dailyUrlGenerated = n8nData.url;
           }
         } catch (e) { console.error('[MEDIC WebRTC ERROR]', e); }
 
@@ -4011,13 +3307,8 @@ const channel = supabase
             estado: 'buscando',
             ubicacion_lat: citizenCoords.lat,
             ubicacion_lng: citizenCoords.lng,
-<<<<<<< HEAD
             costo_total: medicalFee,
             sala_webrtc_url: dailyUrlGenerated
-=======
-            tarifa_aplicada: medicalFee,
-            sala_webrtc_url: "https://meet.jit.si/SecureFlow-Medic-" + emerId
->>>>>>> f68308996d3c85a5177b29f3c22c44aa3ff0af2c
           });
           
           // Si Supabase lo bloquea, lo mostramos en pantalla de inmediato
@@ -4034,7 +3325,6 @@ const channel = supabase
     );
   };
 
-  // Función de Pago y Cierre Real de Telemedicina
   const handleEndMedicSession = async () => {
     if (!activeMedicEmergency) return;
     const rate = activeMedicEmergency.price || 20.00;
@@ -4045,50 +3335,55 @@ const channel = supabase
       async () => {
         setIsAuthLoading(true);
         try {
+          // 1. Finalizar la sesión
           await supabase.from('asistencias_medicas').update({ estado: 'finalizada' }).eq('id', activeMedicEmergency.id);
 
           const { data: emerData } = await supabase.from('asistencias_medicas').select('ciudadano_id').eq('id', activeMedicEmergency.id).maybeSingle();
           const citizenAuthId = emerData?.ciudadano_id;
 
-          if (citizenAuthId) {
-            const { data: balanceRow } = await supabase.from('saldos').select('creditos_disponibles').eq('usuario_id', citizenAuthId).maybeSingle();
-            const newClientBal = Math.max(0, (balanceRow?.creditos_disponibles || 0) - rate);
-            await supabase.from('saldos').update({ creditos_disponibles: newClientBal }).eq('usuario_id', citizenAuthId);
-          }
+          if (!citizenAuthId) throw new Error("No se encontró el ID del ciudadano");
+
+          // === 🛡️ AUTO-PARCHE DEFINITIVO === 
+          // Obliga a que tanto el Médico como el Ciudadano existan en la tabla usuarios
+          // Esto elimina para siempre cualquier error de "Foreign Key" (llave foránea)
+          await supabase.from('usuarios').upsert([
+            { id: sessionUser?.id, auth_id: sessionUser?.id, rol: 'medic' },
+            { id: citizenAuthId, auth_id: citizenAuthId, rol: 'citizen' }
+          ], { onConflict: 'auth_id' });
 
           const driverReceives = rate * 0.80;
           const platformFee = rate * 0.20;
 
-          const { data: profBalRow } = await supabase.from('saldos_medicos').select('balance').eq('user_id', sessionUser?.id).maybeSingle();
-          const newProfBal = (profBalRow?.balance || 0.00) + driverReceives;
-
-          await supabase.from('saldos_medicos').upsert({ user_id: sessionUser?.id, balance: newProfBal, updated_at: new Date().toISOString() }, { onConflict: 'user_id' });
-          setMedicBalanceClean(newProfBal);
-
-          const { data: usrRow } = await supabase.from('usuarios').select('id').eq('auth_id', sessionUser?.id).maybeSingle();
-          const mUsrId = usrRow?.id || sessionUser?.id;
-
-          await supabase.from('historial_comisiones').insert({
-            servicio_id: activeMedicEmergency.id,
-            tipo_servicio: 'medico',
-            profesional_id: mUsrId,
-            cliente_id: citizenAuthId,
-            monto_cobrado: rate,
-            ganancia_profesional: driverReceives,
-            comision_secureflow: platformFee
+          // === 🛡️ LA VERDADERA SOLUCIÓN AL ERROR ===
+          // Pasamos tu sessionUser.id DIRECTO. Sin búsquedas raras que rompan la base de datos.
+          const { error: rpcError } = await supabase.rpc('procesar_cobro_medico', {
+             p_asistencia_id: activeMedicEmergency.id,
+             p_ciudadano_auth_id: citizenAuthId,
+             p_tabla_medico_id: sessionUser?.id,
+             p_tabla_profesional_id: sessionUser?.id,
+             p_monto_total: rate,
+             p_ganancia: driverReceives,
+             p_comision: platformFee
           });
+          
+          if (rpcError) throw rpcError;
 
+          // Actualizar vista local y sumar el dinero visualmente
+          setMedicBalanceClean(prev => prev + driverReceives);
           setCompletedMedicSessions(c => c + 1);
           setTotalMedicEarnings(prev => prev + driverReceives);
           setIsLiveVideoActive(false);
           setMedicState('idle');
           setActiveMedicEmergency(null);
-          showMaterialAlert('✅ Consulta Concluida', 'Sesión telemédica terminada. Diagnóstico y receta encriptada enviados al expediente del paciente.');
-
-          const { data: hist } = await supabase.from('historial_comisiones').select('*').eq('profesional_id', mUsrId).eq('tipo_servicio', 'medico').order('created_at', { ascending: false });
+          
+          // Refrescar historial en la pantalla
+          const { data: hist } = await supabase.from('historial_comisiones').select('*').eq('profesional_id', sessionUser?.id).eq('tipo_servicio', 'medico').order('created_at', { ascending: false });
           if (hist) setMedicHistory(hist);
 
+          showMaterialAlert('✅ Consulta Concluida', 'Sesión telemédica terminada. Cobro seguro procesado.');
+
         } catch (e: any) {
+          console.error("Error BD:", e);
           showMaterialAlert('❌ Error al Finalizar', e.message || 'No se pudo procesar el cobro.');
         } finally {
           setIsAuthLoading(false);
@@ -4096,7 +3391,6 @@ const channel = supabase
       }
     );
   };
-
   
 
   const handleAmbulanceSupportSend = async () => {
@@ -4354,11 +3648,7 @@ const channel = supabase
               id: authData.user.id,
               auth_id: authData.user.id,
               nombre_completo: finalName,
-<<<<<<< HEAD
               placa_vehiculo: gruaIdField.trim() || 'Por Asignar',
-=======
-              placa_vehiculo: gruaIdField.trim() || 'A92B45X',
->>>>>>> f68308996d3c85a5177b29f3c22c44aa3ff0af2c
               telefono: finalPhone,
               tarifa_base: 30.00,
               precio_km: 2.50,
@@ -4385,11 +3675,7 @@ const channel = supabase
               email: authEmail.trim(),
               phone: finalPhone,
               city: selectedCity,
-<<<<<<< HEAD
               vehiclePlate: gruaIdField.trim() || 'Por Asignar'
-=======
-              vehiclePlate: gruaIdField.trim() || 'A92B45X'
->>>>>>> f68308996d3c85a5177b29f3c22c44aa3ff0af2c
             });
             setDriverBalance(0.00);
 
@@ -4398,7 +3684,6 @@ const channel = supabase
             setSessionUser(authData.user);
             setActiveDevice('driver');
 
-<<<<<<< HEAD
           } else if (chosenRole === 'medic') {
             // REGISTRO DIRECTO Y EXCLUSIVO DE MÉDICOS (Sin insertar en 'usuarios')
             const { error: medicoErr } = await supabase.from('medicos').upsert([{
@@ -4412,19 +3697,6 @@ const channel = supabase
               tarifa_base: 20.00,
               deuda_comisiones: 0
             }]);
-=======
-          } else {
-            // PARA TODOS LOS DEMÁS ROLES: PASO 2 (Identidad Base obligatoria)
-            const { error: dbErr } = await supabase.from('usuarios').upsert([{
-              id: uId,
-              auth_id: uId,
-              nombre_completo: citizenProfile.name || 'Usuario SecureFlow',
-              telefono: citizenProfile.phone || '584241234567',
-              email: authEmail.trim(),
-              rol: rolSeleccionado,
-              ciudad: selectedCity
-            }], { onConflict: 'auth_id' });
->>>>>>> f68308996d3c85a5177b29f3c22c44aa3ff0af2c
 
             if (medicoErr) throw medicoErr;
 
@@ -4630,11 +3902,7 @@ const channel = supabase
               especialidad: selectRole === 'lawyer' ? 'Defensa Penal' : (selectRole === 'medic' ? 'Triaje de Guardia' : ''),
               impre_bogado: impreAbogadoField || 'INPRE-98.421',
               ciudadano_id: ciudadanoIdField || 'V-12.345.678',
-<<<<<<< HEAD
               grua_id: gruaIdField || 'Por Asignar',
-=======
-              grua_id: gruaIdField || 'A92B45X',
->>>>>>> f68308996d3c85a5177b29f3c22c44aa3ff0af2c
               credential_ambulance: credentialAmbulanceField || 'AMB-402X',
               credential_medic: credentialMedicField || 'MSAS-42.501'
             };
@@ -4676,11 +3944,7 @@ const channel = supabase
                   id: authData.user.id,
                   auth_id: authData.user.id,
                   nombre_completo: finalName,
-<<<<<<< HEAD
                   placa_vehiculo: gruaIdField.trim() || 'A92sinB45X',
-=======
-                  placa_vehiculo: gruaIdField.trim() || 'A92B45X',
->>>>>>> f68308996d3c85a5177b29f3c22c44aa3ff0af2c
                   telefono: finalPhone,
                   tarifa_base: 30.00,
                   precio_km: 2.50,
@@ -4707,11 +3971,7 @@ const channel = supabase
                   email: authEmail.trim(),
                   phone: finalPhone,
                   city: selectedCity,
-<<<<<<< HEAD
                   vehiclePlate: gruaIdField.trim() || 'sinplaca'
-=======
-                  vehiclePlate: gruaIdField.trim() || 'A92B45X'
->>>>>>> f68308996d3c85a5177b29f3c22c44aa3ff0af2c
                 });
                 setDriverBalance(0.00);
 
@@ -4720,7 +3980,6 @@ const channel = supabase
                 setSessionUser(authData.user);
                 setActiveDevice('driver');
 
-<<<<<<< HEAD
               } else if (chosenRole === 'medic') {
                 // REGISTRO FALLBACK EXCLUSIVO MÉDICOS
                 const { error: medicoErr } = await supabase.from('medicos').upsert([{
@@ -4753,8 +4012,6 @@ const channel = supabase
                 setSessionUser(authData.user);
                 setActiveDevice('medic');
 
-=======
->>>>>>> f68308996d3c85a5177b29f3c22c44aa3ff0af2c
               } else {
                 // PARA TODOS LOS DEMÁS ROLES: PASO 2 (Identidad Base obligatoria)
                 const { error: dbErr } = await supabase.from('usuarios').upsert([{
@@ -4818,7 +4075,6 @@ const channel = supabase
                     city: selectedCity
                   });
 
-<<<<<<< HEAD
              } else if (chosenRole === 'ambulance') {
                   const { error: paramedicoErr } = await supabase.from('paramedicos').upsert([{
                     id: authData.user.id,
@@ -4832,31 +4088,17 @@ const channel = supabase
                   }]);
 
                   await supabase.from('saldos_ambulancias').insert([{
-=======
-                } else if (chosenRole === 'ambulance') {
-                  const { error: sldAmbErr } = await supabase.from('saldos_ambulancias').insert([{
->>>>>>> f68308996d3c85a5177b29f3c22c44aa3ff0af2c
                     user_id: uId,
                     balance: 0.00,
                     updated_at: new Date().toISOString()
                   }]);
-<<<<<<< HEAD
-=======
-                  if (sldAmbErr) {
-                    console.warn('Non-blocking saldos_ambulancias insert info:', sldAmbErr);
-                  }
->>>>>>> f68308996d3c85a5177b29f3c22c44aa3ff0af2c
 
                   setAmbulanceProfile({
                     name: finalName,
                     email: authEmail.trim(),
                     phone: finalPhone,
                     city: selectedCity,
-<<<<<<< HEAD
                     vehiclePlate: credentialAmbulanceField || 'AMB-TEST'
-=======
-                    vehiclePlate: credentialAmbulanceField || 'AMB-402X'
->>>>>>> f68308996d3c85a5177b29f3c22c44aa3ff0af2c
                   });
 
                 } else if (chosenRole === 'medic') {
@@ -4941,7 +4183,6 @@ const channel = supabase
 
 // Real synchronized Requesting of visual roadside assistance towing (Insurtech Dispatcher)
   const handleTowRequest = async () => {
-<<<<<<< HEAD
     let realLat = citizenCoords.lat;
     let realLng = citizenCoords.lng;
 
@@ -4963,132 +4204,6 @@ const channel = supabase
         if (err.code === 3) msg = "El GPS tardó demasiado en responder.";
         showMaterialAlert('📡 GPS Requerido', `No podemos solicitar la grúa sin tu ubicación 100% real.\n\nDetalle: ${msg}`);
         return;
-=======
-    setIsAuthLoading(true);
-    let assignedGrueroId = null;
-    let baseFee = tariffs.grua?.tarifa_base ?? (citizenVehicleType === 'coche' ? 30.00 : 20.00);
-    let kmRate = tariffs.grua?.precio_por_km ?? (citizenVehicleType === 'coche' ? 4.50 : 3.00);
-    let distanceInKm = 5.4; // default / fallback distance
-
-    try {
-      // Fetch available crane units with joining of grueros details
-      const { data: unitsData, error: fetchErr } = await supabase
-        .from('unidades_grua')
-        .select(`
-          id,
-          gruero_id,
-          estado,
-          lat_actual,
-          lng_actual,
-          grueros (
-            id,
-            tarifa_base,
-            precio_km,
-            nombre_completo,
-            telefono
-          )
-        `)
-        .eq('estado', 'disponible');
-
-      if (fetchErr) {
-        console.warn("Could not fetch available units, error:", fetchErr);
-      }
-
-      let units = unitsData || [];
-
-      // Fallback: If no crane units are found as "disponible", try any "conectado" state units
-      if (units.length === 0) {
-        const { data: connectedUnits } = await supabase
-          .from('unidades_grua')
-          .select(`
-            id,
-            gruero_id,
-            estado,
-            lat_actual,
-            lng_actual,
-            grueros (
-              id,
-              tarifa_base,
-              precio_km,
-              nombre_completo,
-              telefono
-            )
-          `)
-          .eq('estado', 'conectado');
-        if (connectedUnits && connectedUnits.length > 0) {
-          units = connectedUnits;
-        }
-      }
-
-      // Fallback 2: Try fetching any crane units regardless of status
-      if (units.length === 0) {
-        const { data: allUnits } = await supabase
-          .from('unidades_grua')
-          .select(`
-            id,
-            gruero_id,
-            estado,
-            lat_actual,
-            lng_actual,
-            grueros (
-              id,
-              tarifa_base,
-              precio_km,
-              nombre_completo,
-              telefono
-            )
-          `);
-        if (allUnits && allUnits.length > 0) {
-          units = allUnits;
-        }
-      }
-
-      let closestDistance = 999999;
-      let selectedUnit = null;
-
-      if (units && units.length > 0) {
-        for (const unit of units) {
-          const lat = Number(unit.lat_actual);
-          const lng = Number(unit.lng_actual);
-          if (!isNaN(lat) && !isNaN(lng) && lat !== 0 && lng !== 0) {
-            const dist = getHaversineDistance(citizenCoords.lat, citizenCoords.lng, lat, lng);
-            if (dist < closestDistance) {
-              closestDistance = dist;
-              selectedUnit = unit;
-            }
-          }
-        }
-      }
-
-      if (selectedUnit) {
-        assignedGrueroId = selectedUnit.gruero_id;
-        distanceInKm = closestDistance;
-        
-        // Update local crane unit track state
-        setCraneUnitState({
-          lat_actual: Number(selectedUnit.lat_actual) || 10.4900,
-          lng_actual: Number(selectedUnit.lng_actual) || -66.9100
-        });
-
-        const grueroObj: any = selectedUnit.grueros;
-        if (grueroObj) {
-          baseFee = tariffs.grua?.tarifa_base ?? (Number(grueroObj.tarifa_base) || baseFee);
-          kmRate = tariffs.grua?.precio_por_km ?? (Number(grueroObj.precio_km) || kmRate);
-        }
-      } else {
-        // If still no unit, select any registered gruero from the db
-        const { data: fallbackGruero } = await supabase
-          .from('grueros')
-          .select('*')
-          .limit(1)
-          .maybeSingle();
-
-        if (fallbackGruero) {
-          assignedGrueroId = fallbackGruero.id;
-          baseFee = tariffs.grua?.tarifa_base ?? (Number(fallbackGruero.tarifa_base) || baseFee);
-          kmRate = tariffs.grua?.precio_por_km ?? (Number(fallbackGruero.precio_km) || kmRate);
-        }
->>>>>>> f68308996d3c85a5177b29f3c22c44aa3ff0af2c
       }
       setIsAuthLoading(false);
     }
@@ -5104,22 +4219,11 @@ const channel = supabase
     setIsAuthLoading(false);
 
     const userConfirmed = window.confirm(
-<<<<<<< HEAD
       `🚜 SOLICITUD DE ASISTENCIA VIAL\n\n` +
       `Se emitirá una alerta a todas las unidades de grúa en tu zona.\n\n` +
       `• Tarifa Base: $${baseFee.toFixed(2)} USD\n` +
       `• Precio por KM: $${kmRate.toFixed(2)} USD\n\n` +
       `¿Aceptar y solicitar despacho inmediato?`
-=======
-      `🚜 SOLICITUD DE ASISTENCIA VIAL EN CAMINO\n\n` +
-      `Fórmula de Tarifas de Producción Sincronizada:\n` +
-      `• Tarifa Base: $${baseFee.toFixed(2)} USD\n` +
-      `• Precio por KM: $${kmRate.toFixed(2)} USD\n` +
-      `• Distancia Real (GPS): ${distanceInKm.toFixed(2)} KM\n` +
-      `• Desglose Real: $${baseFee.toFixed(2)} + (${distanceInKm.toFixed(2)} km * $${kmRate.toFixed(2)}/km)\n` +
-      `• Costo Total Calculado: $${costoTotal.toFixed(2)} USD\n\n` +
-      `¿Aceptar y proceder con el despacho de la grúa?`
->>>>>>> f68308996d3c85a5177b29f3c22c44aa3ff0af2c
     );
 
     if (!userConfirmed) return;
@@ -5143,22 +4247,12 @@ const channel = supabase
     setTowDailyCoUrl("https://iframe.daily.co/secureflow-tow-" + emerId);
 
     try {
-<<<<<<< HEAD
       const vialInsertVal = {
         id: emerId,
         ciudadano_id: sessionUser?.id || null,
         gruero_id: null, 
         ubicacion_origen_lat: realLat,
         ubicacion_origen_lng: realLng,
-=======
-      // Fallback table insertion - now primary table for cranes
-      const vialInsertVal = {
-        id: emerId,
-        ciudadano_id: sessionUser?.id || null,
-        gruero_id: null,
-        ubicacion_origen_lat: citizenCoords.lat,
-        ubicacion_origen_lng: citizenCoords.lng,
->>>>>>> f68308996d3c85a5177b29f3c22c44aa3ff0af2c
         ubicacion_destino_texto: towDestinationText,
         estado: 'pendiente',
         costo_total: costoTotal,
@@ -5166,28 +4260,13 @@ const channel = supabase
         sala_webrtc_url: "https://iframe.daily.co/secureflow-tow-" + emerId
       };
 
-<<<<<<< HEAD
       const { data: insertedVialRow } = await supabase.from('asistencias_viales').insert(vialInsertVal).select().maybeSingle();
       if (insertedVialRow) setActiveVialAssist(insertedVialRow);
-=======
-      const { data: insertedVialRow } = await supabase
-        .from('asistencias_viales')
-        .insert(vialInsertVal)
-        .select()
-        .maybeSingle();
-
-      if (insertedVialRow) {
-        setActiveVialAssist(insertedVialRow);
-        console.log("Successfully inserted asistencias_viales row. GPS polling backup active.");
-      }
-
->>>>>>> f68308996d3c85a5177b29f3c22c44aa3ff0af2c
       triggerPush('🚜 Alerta Solicitud Grúa', 'Buscando unidad de grúa disponible en el sector...');
     } catch (e) {
       console.error("Error creating pending tow row in Supabase:", e);
     }
   };
-<<<<<<< HEAD
 const handleOnTowRequestActivated = async (updated: any) => {
     // 1. Textos neutros de seguridad (Solo se usarán si la base de datos está vacía)
     let drName = 'Operador';
@@ -5195,40 +4274,22 @@ const handleOnTowRequestActivated = async (updated: any) => {
     let vPlate = 'Sin Placa';
 
     // 2. Aquí va a Supabase a buscar los DATOS REALES del gruero
-=======
-
-  const handleOnTowRequestActivated = async (updated: any) => {
-    // Recover driver details to enrich top summary
-    let drName = 'Carlos Ruiz';
-    let drPhone = 'No phone';
-    let vPlate = 'A92B45X';
-
->>>>>>> f68308996d3c85a5177b29f3c22c44aa3ff0af2c
     if (updated.gruero_id) {
       const { data: grueroRow } = await supabase
         .from('grueros')
         .select('nombre_completo, telefono, placa_vehiculo')
         .eq('id', updated.gruero_id)
         .maybeSingle();
-<<<<<<< HEAD
       
       // Si encuentra los datos, sobrescribe los textos neutros por la VERDAD
       if (grueroRow) {
         drName = grueroRow.nombre_completo || drName;
-=======
-      if (grueroRow) {
-        drName = grueroRow.nombre_completo;
->>>>>>> f68308996d3c85a5177b29f3c22c44aa3ff0af2c
         drPhone = grueroRow.telefono || drPhone;
         vPlate = grueroRow.placa_vehiculo || vPlate;
       }
     }
 
-<<<<<<< HEAD
     // 3. Transición al mapa
-=======
-    // Immediate jump to Map
->>>>>>> f68308996d3c85a5177b29f3c22c44aa3ff0af2c
     setTowState('dispatched');
     setCitizenTab('home');
 
@@ -5236,31 +4297,19 @@ const handleOnTowRequestActivated = async (updated: any) => {
     setActiveTowJob({
       id: updated.id,
       citizenName: citizenProfile.name || 'Ciudadano',
-<<<<<<< HEAD
       citizenPhone: citizenProfile.phone || 'No registrado',
-=======
-      citizenPhone: citizenProfile.phone || 'No phone',
->>>>>>> f68308996d3c85a5177b29f3c22c44aa3ff0af2c
       status: 'en_route',
       latitude: updated.ubicacion_origen_lat || citizenCoords.lat,
       longitude: updated.ubicacion_origen_lng || citizenCoords.lng,
       price: updated.costo_total,
-<<<<<<< HEAD
       distance: updated.distancia_metros || 0,
-=======
-      distance: updated.distancia_metros || 5400,
->>>>>>> f68308996d3c85a5177b29f3c22c44aa3ff0af2c
       driverName: drName,
       driverPhone: drPhone,
       vehiclePlate: vPlate,
       gruero_id: updated.gruero_id
     });
 
-<<<<<<< HEAD
     showMaterialAlert('🚜 Operador en Camino', `El operador de grúa ${drName} con placa ${vPlate} ha aceptado tu solicitud.`);
-=======
-    showMaterialAlert('🚜 Operador en Camino', `El operador de grúa ${drName} con placa ${vPlate} ha aceptado tu solicitud de traslado en tiempo real.`);
->>>>>>> f68308996d3c85a5177b29f3c22c44aa3ff0af2c
   };
 
   const handleCancelTowRequest = async () => {
@@ -5509,7 +4558,6 @@ const handleOnTowRequestActivated = async (updated: any) => {
 
     if (!activeTowJob) return;
 
-<<<<<<< HEAD
     let realLat = towDriverCoords.lat;
     let realLng = towDriverCoords.lng;
 
@@ -5555,38 +4603,6 @@ const handleOnTowRequestActivated = async (updated: any) => {
         setTowState('idle'); 
         return;
       }
-=======
-    // TRANSICIÓN INMEDIATA COUPLING: Actualizar estados de React justo después de que la función se invoque
-    // para desmontar la tarjeta amarilla en el panel gruero y renderizar el mapa de seguimiento ipso facto.
-    const acceptedJobId = activeTowJob.id;
-    setActiveTowJob(prev => prev ? {
-      ...prev,
-      status: 'en_route',
-      driverName: driverProfile.name || 'Operador Asignado',
-      driverPhone: driverProfile.phone || 'No phone'
-    } : null);
-    setTowState('dispatched');
-
-    // Defensive DB Update in isolated try block so failures won't lock up UI transition
-    try {
-      // Also trigger initial message locally of driver to synchronize the chat
-      const timeStr = new Date().toLocaleTimeString('es-VE', { hour: '2-digit', minute: '2-digit', hour12: false });
-      const initialMsg = {
-        sender: 'driver' as const,
-        text: `🚨 Hola, soy el operador de grúa ${driverProfile.name || 'Asignado'}. Ya voy en ruta hacia tu localización en tiempo real con mi remolque. Puedes escribirme por aquí.`,
-        time: timeStr
-      };
-      setTowMessages(prev => [...prev, initialMsg]);
-
-      // Broadcast this initial message so the citizen hears it instantly!
-      try {
-        await supabase.channel(`room-tow-${acceptedJobId}`).send({
-          type: 'broadcast',
-          event: 'shout',
-          payload: { msg: initialMsg }
-        });
-      } catch {}
->>>>>>> f68308996d3c85a5177b29f3c22c44aa3ff0af2c
 
       // CÁLCULO MATEMÁTICO REAL: Ya tenemos el GPS de ambos, calculamos la distancia y tarifa final.
       const distanceKm = calculateDistanceInKm(realLat, realLng, activeTowJob.latitude, activeTowJob.longitude);
@@ -5600,7 +4616,6 @@ const handleOnTowRequestActivated = async (updated: any) => {
         .from('asistencias_viales')
         .update({
           estado: 'activa',
-<<<<<<< HEAD
           gruero_id: actualGrueroId,
           distancia_metros: distanceMeters,
           costo_total: calculatedPrice
@@ -5642,65 +4657,8 @@ const handleOnTowRequestActivated = async (updated: any) => {
     } catch (err) {
       console.error("Error crítico conectando el viaje:", err);
       setTowState('idle'); 
-=======
-          gruero_id: sessionUser.id
-        })
-        .eq('id', acceptedJobId);
-    } catch (err) {
-      console.error("Error updating database for accepted tow job:", err);
     }
-
-    // Query or create units of this gruero in isolated defensive block
-    if (sessionUser?.id) {
-      try {
-        const { data: craneUnit } = await supabase
-          .from('unidades_grua')
-          .select('*')
-          .eq('gruero_id', sessionUser.id)
-          .maybeSingle();
-        
-        if (craneUnit) {
-          setCraneUnitState({
-            lat_actual: Number(craneUnit.lat_actual) || 10.4900,
-            lng_actual: Number(craneUnit.lng_actual) || -66.9100
-          });
-        } else {
-          const newUnit = {
-            gruero_id: sessionUser.id,
-            estado: 'en_ruta',
-            lat_actual: 10.4900,
-            lng_actual: -66.9100
-          };
-          await supabase.from('unidades_grua').insert(newUnit);
-          setCraneUnitState({ lat_actual: 10.4900, lng_actual: -66.9100 });
-        }
-      } catch (err) {
-        console.error("Error setting up units_grua row in DB:", err);
-      }
->>>>>>> f68308996d3c85a5177b29f3c22c44aa3ff0af2c
-    }
-
-    // Prepend or add first driver message with logged-in driver's actual registered name via DB Insert
-    const initialDriverMsgText = `🚨 Hola, soy el operador de grúa ${driverProfile.name || 'Asignado'}. Ya voy en ruta hacia tu localización en tiempo real con mi remolque. Puedes escribirme por aquí.`;
-    
-    try {
-      await supabase
-        .from('mensajes_viales')
-        .insert({
-          asistencia_id: acceptedJobId,
-          remitente: 'driver',
-          mensaje: initialDriverMsgText
-        });
-    } catch (e) {
-      console.error("Error inserting initial driver message in mensajes_viales:", e);
-    }
-
-    triggerPush('🚜 Despacho Vial Aceptado', 'El operador ha iniciado tránsito hacia las coordenadas de tu GPS.');
   };
-<<<<<<< HEAD
-=======
-
->>>>>>> f68308996d3c85a5177b29f3c22c44aa3ff0af2c
   // Driver/citizen sends chat (synchronized via real-time Broadcast & DB fallback)
   const handleSendTowMessage = async (senderRole: 'driver' | 'citizen') => {
     const text = senderRole === 'driver' ? driverChatInput.trim() : towChatInput.trim();
@@ -5751,47 +4709,6 @@ const handleOnTowRequestActivated = async (updated: any) => {
         });
     } catch (e) {
       console.log("Error sending synchronized tow chat message to DB (fallback):", e);
-<<<<<<< HEAD
-=======
-    }
-  };
-
-  // Driver simulated movement progress simulation function
-  const handleSimulateDriverProgress = async () => {
-    if (!activeTowJob) return;
-    const destLat = activeTowJob.latitude || citizenCoords.lat;
-    const destLng = activeTowJob.longitude || citizenCoords.lng;
-
-    const latDiff = destLat - towDriverCoords.lat;
-    const lngDiff = destLng - towDriverCoords.lng;
-    
-    // Move 25% closer on each simulation click
-    const stepLat = towDriverCoords.lat + latDiff * 0.25;
-    const stepLng = towDriverCoords.lng + lngDiff * 0.25;
-
-    setTowDriverCoords({ lat: stepLat, lng: stepLng });
-    setCraneUnitState({ lat_actual: stepLat, lng_actual: stepLng });
-
-    try {
-      // 1. Update unidades_grua
-      const { data: qGruero } = await supabase
-        .from('grueros')
-        .select('id')
-        .eq('auth_id', sessionUser?.id)
-        .maybeSingle();
-
-      const actualGrueroId = qGruero?.id;
-      if (actualGrueroId) {
-        await supabase
-          .from('unidades_grua')
-          .update({ lat_actual: stepLat, lng_actual: stepLng })
-          .eq('gruero_id', actualGrueroId);
-      }
-
-      triggerPush('🚜 Grúa en Movimiento', 'Localización GPS simulada con éxito hacia tu vehículo.');
-    } catch (e) {
-      console.error("Error in driver simulated movement progress:", e);
->>>>>>> f68308996d3c85a5177b29f3c22c44aa3ff0af2c
     }
   };
 
@@ -5940,7 +4857,7 @@ const handleSendMedicAI = async () => {
 
   // Complete tow job & updates commission debt of tow driver (DB Synced & Real Transactions)
   // Complete tow job & updates commission debt of tow driver (DB Synced & Real Transactions)
-  const handleFinalizeTowJob = async () => {
+ const handleFinalizeTowJob = async () => {
     if (!activeTowJob) return;
 
     try {
@@ -5969,204 +4886,36 @@ const handleSendMedicAI = async () => {
 
       const vType = citizenUser?.vehicle_selection || citizenUser?.tipo_vehiculo || 'coche';
 
-      // 3. Matemática Real: Calcular distancia y precio
+      // 3. Matemática Real
       const distanceInKm = activeTowJob.distance / 1000 || 5.40;
       const baseFee = tariffs.grua?.tarifa_base ?? (vType === 'coche' ? 30.00 : 20.00);
       const kmRate = tariffs.grua?.precio_por_km ?? (vType === 'coche' ? 4.50 : 3.00);
       const calculatedPrice = baseFee + (distanceInKm * kmRate);
 
-      // MATEMÁTICA NUEVA: 10% Comisión Plataforma, 90% para el Gruero
       const platformFee = calculatedPrice * 0.10;
       const driverReceives = calculatedPrice - platformFee;
 
-      // A. Cerrar viaje en la BD
+      // === 🛡️ LA MAGIA DE LA SEGURIDAD: LLAMADA AL BACKEND ===
+      const { error: rpcError } = await supabase.rpc('procesar_cobro_grua', {
+        p_asistencia_id: activeTowJob.id,
+        p_ciudadano_auth_id: citizenId,
+        p_gruero_auth_id: sessionUser?.id,
+        p_monto_total: calculatedPrice,
+        p_ganancia: driverReceives,
+        p_comision: platformFee
+      });
+
+      if (rpcError) throw rpcError;
+
+      // Cerrar viaje visualmente en la BD
       await supabase
         .from('asistencias_viales')
         .update({ estado: 'completado' })
         .eq('id', activeTowJob.id);
 
-<<<<<<< HEAD
-      // B. Debitar saldo del ciudadano
-      const { data: balanceRow } = await supabase
-        .from('saldos')
-        .select('creditos_disponibles')
-        .eq('usuario_id', citizenId)
-=======
-            // Update asistencias_viales table state in DB
-            await supabase
-              .from('asistencias_viales')
-              .update({ estado: 'completado' })
-              .eq('id', activeTowJob.id);
-
-            // B. Debit total amount from saldos
-            const { data: balanceRow } = await supabase
-              .from('saldos')
-              .select('creditos_disponibles')
-              .eq('usuario_id', citizenId)
-              .maybeSingle();
-
-            const newClientBal = Math.max(0, (balanceRow?.creditos_disponibles || 35.0) - calculatedPrice);
-            await supabase
-              .from('saldos')
-              .update({ creditos_disponibles: newClientBal })
-              .eq('usuario_id', citizenId);
-
-            setCitizenBalance(newClientBal);
-
-            // C. Add 80% to saldos_grueros and synchronize correctly
-            // First resolve actual gruero_id of logged-in user
-            const actualGrueroId = assist?.gruero_id || activeTowJob.gruero_id;
-
-            let currentGrueroBalance = 0.00;
-            let profRow = null;
-
-            if (actualGrueroId) {
-              const { data } = await supabase
-                .from('saldos_grueros')
-                .select('balance')
-                .eq('gruero_id', actualGrueroId)
-                .maybeSingle();
-              if (data) profRow = data;
-            }
-
-            if (!profRow) {
-              const { data } = await supabase
-                .from('saldos_grueros')
-                .select('balance')
-                .eq('user_id', sessionUser?.id)
-                .maybeSingle();
-              if (data) profRow = data;
-            }
-
-            currentGrueroBalance = profRow?.balance || 0.00;
-            const newProfBal = currentGrueroBalance + driverReceives;
-
-            // Update/Upsert via gruero_id helper
-            if (actualGrueroId) {
-              const { data: uRes, error: uErr } = await supabase
-                .from('saldos_grueros')
-                .update({ balance: newProfBal, updated_at: new Date().toISOString() })
-                .eq('gruero_id', actualGrueroId)
-                .select();
-
-              if (uErr || !uRes || uRes.length === 0) {
-                await supabase
-                  .from('saldos_grueros')
-                  .upsert({
-                    gruero_id: actualGrueroId,
-                    user_id: sessionUser?.id || null,
-                    balance: newProfBal,
-                    updated_at: new Date().toISOString()
-                  }, { onConflict: 'gruero_id' });
-              }
-            }
-
-            // Also fallback/update by user_id
-            if (sessionUser?.id) {
-              const { data: uRes2, error: uErr2 } = await supabase
-                .from('saldos_grueros')
-                .update({ balance: newProfBal, updated_at: new Date().toISOString() })
-                .eq('user_id', sessionUser.id)
-                .select();
-
-              if (uErr2 || !uRes2 || uRes2.length === 0) {
-                await supabase
-                  .from('saldos_grueros')
-                  .upsert({
-                    user_id: sessionUser.id,
-                    gruero_id: actualGrueroId || null,
-                    balance: newProfBal,
-                    updated_at: new Date().toISOString()
-                  }, { onConflict: 'user_id' });
-              }
-            }
-
-            setDriverBalance(newProfBal);
-
-            // D. Insert record into historial_comisiones
-            await supabase.from('historial_comisiones').insert({
-              servicio_id: activeTowJob.id,
-              tipo_servicio: 'grua',
-              profesional_id: sessionUser?.id,
-              cliente_id: citizenId,
-              monto_cobrado: calculatedPrice,
-              ganancia_profesional: driverReceives,
-              comision_secureflow: platformFee
-            });
-
-            setTowState('idle');
-            setActiveTowJob(null);
-            setActiveVialAssist(null);
-            showMaterialAlert('✅ Concluido', `Asistencia vial finalizada de forma real. Se cargaron $${calculatedPrice.toFixed(2)} USD y tus fondos de $${driverReceives.toFixed(2)} USD se acreditaron de inmediato.`);
-          } catch (e) {
-            console.error("Error running finalize tow database transaction processes:", e);
-            showMaterialAlert('❌ Error Grave', 'Error procesando transacciones reales en Supabase.');
-          } finally {
-            setIsAuthLoading(false);
-          }
-        }
-      );
-    } catch (err) {
-      console.error(err);
-      showMaterialAlert('❌ Error de Lectura', 'No se pudo conectar con la base de datos para calcular la tarifa.');
-    }
-  };
-
-  // Complete ambulance job & updates paramedic balance (DB Synced & Real Transactions)
-  const handleFinalizeAmbulanceJob = async () => {
-    if (!activeAmbulanceJob) return;
-
-    try {
-      // 1. Fetch emergency details from emergencias_activas to get the real citizen_id
-      const { data: emer } = await supabase
-        .from('emergencias_activas')
-        .select('*')
-        .eq('id', activeAmbulanceJob.id)
->>>>>>> f68308996d3c85a5177b29f3c22c44aa3ff0af2c
-        .maybeSingle();
-
-      const newClientBal = Math.max(0, (balanceRow?.creditos_disponibles || 0) - calculatedPrice);
-      await supabase
-        .from('saldos')
-        .update({ creditos_disponibles: newClientBal })
-        .eq('usuario_id', citizenId);
-
-      // C. Acreditar saldo al gruero
-      const actualGrueroId = assist?.gruero_id || activeTowJob.gruero_id;
-      
-      if (actualGrueroId || sessionUser?.id) {
-        const searchCol = actualGrueroId ? 'gruero_id' : 'user_id';
-        const searchVal = actualGrueroId || sessionUser?.id;
-        
-        const { data: profRow } = await supabase
-          .from('saldos_grueros')
-          .select('balance')
-          .eq(searchCol, searchVal)
-          .maybeSingle();
-
-        const newProfBal = (profRow?.balance || 0.00) + driverReceives;
-
-        await supabase
-          .from('saldos_grueros')
-          .upsert({
-            [searchCol]: searchVal,
-            balance: newProfBal,
-            updated_at: new Date().toISOString()
-          }, { onConflict: searchCol });
-
-        setDriverBalance(newProfBal);
-      }
-
-      // D. Historial de comisiones
-      await supabase.from('historial_comisiones').insert({
-        servicio_id: activeTowJob.id,
-        tipo_servicio: 'grua',
-        profesional_id: sessionUser?.id,
-        cliente_id: citizenId,
-        monto_cobrado: calculatedPrice,
-        ganancia_profesional: driverReceives,
-        comision_secureflow: platformFee
-      });
+      // Actualizar saldos locales en pantalla sin hacer fetch
+      setDriverBalance(prev => prev + driverReceives);
+      setCitizenBalance(prev => Math.max(0, prev - calculatedPrice));
 
       // Limpiar pantallas y volver al inicio
       setTowState('idle');
@@ -6174,112 +4923,11 @@ const handleSendMedicAI = async () => {
       setActiveVialAssist(null);
       showMaterialAlert('✅ Concluido', `Servicio finalizado exitosamente. Se descontaron $${calculatedPrice.toFixed(2)} al ciudadano. Tu ganancia neta es de $${driverReceives.toFixed(2)} USD (90%).`);
 
-<<<<<<< HEAD
     } catch (e) {
       console.error("Error al finalizar viaje:", e);
       showMaterialAlert('❌ Error Grave', 'Error procesando la transacción de cierre.');
     } finally {
       setIsAuthLoading(false);
-=======
-      // 3. Calculate distance price dynamically using distance of dispatch
-      const distanceInKm = activeAmbulanceJob.distance / 1000 || 2.1;
-      const baseFee = vType === 'coche' ? 30.00 : 20.00;
-      const kmRate = vType === 'coche' ? 5.00 : 3.00;
-      const calculatedPrice = baseFee + distanceInKm * kmRate;
-
-      const driverReceives = calculatedPrice * 0.80;
-      const platformFee = calculatedPrice * 0.20;
-
-      showMaterialConfirm(
-        '🚑 Finalizar Despacho Clínico',
-        `¿Confirmas la entrega exitosa del asegurado en la sala clínica?\n\n` +
-        `• Perfil vehículo leído: ${vType === 'coche' ? '🚗 Coche' : '🏍️ Moto'}\n` +
-        `• Distancia recorrida: ${distanceInKm.toFixed(2)} Km\n` +
-        `• Tarifa total calculada: $${calculatedPrice.toFixed(2)} USD\n` +
-        `• Pago neto paramédico: $${driverReceives.toFixed(2)} USD (80%)\n` +
-        `• Comisión plataforma: $${platformFee.toFixed(2)} USD (20%)`,
-        async () => {
-          try {
-            setIsAuthLoading(true);
-
-            // A. Update emergency state in DB
-            const { error: ambUpdateErr } = await supabase
-              .from('emergencias_activas')
-              .update({ estado: 'finalizada' })
-              .eq('id', activeAmbulanceJob.id);
-            if (ambUpdateErr) throw ambUpdateErr;
-
-            // B. Debit total amount from saldos
-            const { data: balanceRow } = await supabase
-              .from('saldos')
-              .select('creditos_disponibles')
-              .eq('usuario_id', citizenId)
-              .maybeSingle();
-
-            const newClientBal = Math.max(0, (balanceRow?.creditos_disponibles || 35.0) - calculatedPrice);
-            await supabase
-              .from('saldos')
-              .update({ creditos_disponibles: newClientBal })
-              .eq('usuario_id', citizenId);
-
-            setCitizenBalance(newClientBal);
-
-            // C. Add 80% to saldos_ambulancias
-            const { data: profBalRow } = await supabase
-              .from('saldos_ambulancias')
-              .select('balance')
-              .eq('user_id', sessionUser?.id)
-              .maybeSingle();
-
-            const newProfBal = (profBalRow?.balance || 0.00) + driverReceives;
-
-            const { data: updateRes, error: updateErr } = await supabase
-              .from('saldos_ambulancias')
-              .update({
-                balance: newProfBal,
-                updated_at: new Date().toISOString()
-              })
-              .eq('user_id', sessionUser?.id)
-              .select();
-
-            if (updateErr || !updateRes || updateRes.length === 0) {
-              await supabase
-                .from('saldos_ambulancias')
-                .upsert({
-                  user_id: sessionUser?.id,
-                  balance: newProfBal,
-                  updated_at: new Date().toISOString()
-                }, { onConflict: 'user_id' });
-            }
-
-            setAmbulanceBalanceClean(newProfBal);
-
-            // D. Insert record into historial_comisiones
-            await supabase.from('historial_comisiones').insert({
-              servicio_id: activeAmbulanceJob.id,
-              tipo_servicio: 'ambulancia',
-              profesional_id: sessionUser?.id,
-              cliente_id: citizenId,
-              monto_cobrado: calculatedPrice,
-              ganancia_profesional: driverReceives,
-              comision_secureflow: platformFee
-            });
-
-            setAmbulanceState('idle');
-            setActiveAmbulanceJob(null);
-            showMaterialAlert('✅ Concluido', `Traslado completado de forma real. Se cargaron $${calculatedPrice.toFixed(2)} USD de la cuenta de seguro del afiliado.`);
-          } catch (e) {
-            console.error("Error running finalize ambulance database processes:", e);
-            showMaterialAlert('❌ Error Grave', 'Error procesando transacciones reales en Supabase.');
-          } finally {
-            setIsAuthLoading(false);
-          }
-        }
-      );
-    } catch (err) {
-      console.error(err);
-      showMaterialAlert('❌ Error de Lectura', 'No se pudo conectar con la base de datos para calcular la tarifa.');
->>>>>>> f68308996d3c85a5177b29f3c22c44aa3ff0af2c
     }
   };
 
@@ -6550,13 +5198,10 @@ const handleSendMedicAI = async () => {
                                 <option value="Guayaquil, Ecuador">Guayaquil, Ecuador</option>
                                 <option value="Asunción, Paraguay">Asunción, Paraguay</option>
                                 <option value="Montevideo, Uruguay">Montevideo, Uruguay</option>
-<<<<<<< HEAD
                                 <option value="Madrid, España">Madrid, España</option>
                                 <option value="Barcelona, España">Barcelona, España</option>
                                 <option value="Valencia, España">Valencia, España</option>
                                 <option value="Canarias, España">Canarias, España</option>
-=======
->>>>>>> f68308996d3c85a5177b29f3c22c44aa3ff0af2c
                               </select>
                             </div>
 
@@ -6867,15 +5512,9 @@ const handleSendMedicAI = async () => {
                     activeAssistance = {
                       id: resolvedAssist.id,
                       estado: est,
-<<<<<<< HEAD
                       driverName: resolvedAssist.driverName || 'Operador Asignado',
                       driverPhone: resolvedAssist.driverPhone,
                       vehiclePlate: activeTowJob?.vehiclePlate || resolvedAssist.vehiclePlate || 'Cargando...',
-=======
-                      driverName: resolvedAssist.driverName || 'Carlos Ruiz',
-                      driverPhone: resolvedAssist.driverPhone,
-                      vehiclePlate: resolvedAssist.vehiclePlate || 'A92B45X',
->>>>>>> f68308996d3c85a5177b29f3c22c44aa3ff0af2c
                       price: resolvedAssist.price || resolvedAssist.costo_total,
                       distance: resolvedAssist.distance || resolvedAssist.distancia_metros,
                       latitude: resolvedAssist.latitude || resolvedAssist.ubicacion_origen_lat,
@@ -6897,7 +5536,6 @@ const handleSendMedicAI = async () => {
                 if (activeAssistance && activeAssistance.estado === 'activa') {
                   return (
                     <div className="flex-1 flex flex-col relative bg-slate-950 overflow-hidden animate-fade-in min-h-[500px]" id="citizen-active-tracking-fullscreen">
-<<<<<<< HEAD
                       {/* MAPA FORZADO: Rompe el bucle de sincronización y muestra la ruta de inmediato */}
                       <div className="absolute inset-0 z-0">
                         <RoadsideMap
@@ -6907,23 +5545,6 @@ const handleSendMedicAI = async () => {
                           citizenLng={activeAssistance?.longitude || citizenCoords.lng}
                         />
                       </div>
-=======
-                      {craneUnitState?.lat_actual && craneUnitState?.lng_actual && (activeAssistance?.latitude || citizenCoords.lat) && (activeAssistance?.longitude || citizenCoords.lng) ? (
-                        <div className="absolute inset-0 z-0">
-                          <RoadsideMap
-                            driverLat={craneUnitState.lat_actual}
-                            driverLng={craneUnitState.lng_actual}
-                            citizenLat={activeAssistance?.latitude || citizenCoords.lat}
-                            citizenLng={activeAssistance?.longitude || citizenCoords.lng}
-                          />
-                        </div>
-                      ) : (
-                        <div className="absolute inset-0 bg-slate-950 flex flex-col justify-center items-center p-3 text-center space-y-1 z-0">
-                          <span className="text-xl animate-spin text-indigo-400">📡</span>
-                          <span className="text-[10px] text-slate-400 font-bold uppercase tracking-wide">Sincronizando señal GPS de la Grúa...</span>
-                        </div>
-                      )}
->>>>>>> f68308996d3c85a5177b29f3c22c44aa3ff0af2c
 
                       <div className="absolute inset-x-0 bottom-0 z-10 p-3 bg-slate-950/95 border-t border-indigo-500/10 pointer-events-auto flex flex-col max-h-[60%] overflow-y-auto" id="unified-tracking-overlay">
                         <div className="flex justify-between items-center mb-2">
@@ -7044,7 +5665,6 @@ const handleSendMedicAI = async () => {
                   {/* Tab Body Contents */}
                   <div className="flex-1 overflow-y-auto overflow-x-hidden scrollbar-thin">
                     
-<<<<<<< HEAD
                   
                      {/* TAB CITIZEN HOME */}
                     {citizenTab === 'home' && (() => {
@@ -7117,64 +5737,6 @@ const handleSendMedicAI = async () => {
                         );
                       }
 
-=======
-                    {/* TAB CITIZEN HOME */}
-                    {citizenTab === 'home' && (() => {
-                      const activeAssistance = (() => {
-                        const resolvedAssist = activeVialAssist || activeTowJob;
-                        if (!resolvedAssist) return null;
-
-                        const rawState = resolvedAssist.estado || resolvedAssist.status || (towState === 'idle' ? null : towState);
-                        if (!rawState) return null;
-
-                        if (rawState === 'completed' || rawState === 'cancelado' || rawState === 'completado' || rawState === 'idle') {
-                          return null;
-                        }
-
-                        let est = 'pendiente';
-                        if (
-                          rawState === 'activa' ||
-                          rawState === 'en_progreso' ||
-                          rawState === 'active' ||
-                          rawState === 'en_route' ||
-                          rawState === 'dispatched' ||
-                          rawState === 'aceptado'
-                        ) {
-                          est = 'activa';
-                        } else if (
-                          rawState === 'pendiente' ||
-                          rawState === 'pending' ||
-                          rawState === 'proposed'
-                        ) {
-                          est = 'pendiente';
-                        }
-
-                        return {
-                          id: resolvedAssist.id,
-                          estado: est,
-                          driverName: resolvedAssist.driverName || 'Operador de Guardia',
-                          driverPhone: resolvedAssist.driverPhone,
-                          vehiclePlate: resolvedAssist.vehiclePlate || 'A92B45X',
-                          price: resolvedAssist.price || resolvedAssist.costo_total,
-                          distance: resolvedAssist.distance || resolvedAssist.distancia_metros,
-                          latitude: resolvedAssist.latitude || resolvedAssist.ubicacion_origen_lat,
-                          longitude: resolvedAssist.longitude || resolvedAssist.ubicacion_origen_lng
-                        };
-                      })();
-
-                      // CONDICIÓN B: Buscando Grúa -> Pantalla de carga completa de 'Despachando Unidad...'
-                      if (activeAssistance && activeAssistance.estado === 'pendiente') {
-                        return (
-                          <CitizenPendingTowLoader 
-                            assistId={activeAssistance.id}
-                            onActive={handleOnTowRequestActivated}
-                            onCancel={handleCancelTowRequest}
-                          />
-                        );
-                      }
-
-                      // CONDICIÓN C: Viaje Aceptado -> Retorna SOLO el componente <RoadsideMap /> a pantalla completa. Desmonta todo lo demás.
->>>>>>> f68308996d3c85a5177b29f3c22c44aa3ff0af2c
                       if (activeAssistance && (activeAssistance.estado === 'activa' || activeAssistance.estado === 'en_progreso')) {
                         return (
                           <div className="absolute inset-0 z-50 bg-slate-950 flex flex-col justify-stretch overflow-hidden animate-fade-in" id="citizen-active-tracking-fullscreen">
@@ -7195,30 +5757,15 @@ const handleSendMedicAI = async () => {
                               </div>
                             )}
 
-<<<<<<< HEAD
                             <div className="absolute bottom-4 left-4 right-4 z-10 space-y-3 pointer-events-none animate-slide-up" id="floating-live-panel-fullscreen">
-=======
-                            {/* Floating overlays over map: info box, total visual destruction of coexistence Custom */}
-                            <div className="absolute bottom-4 left-4 right-4 z-10 space-y-3 pointer-events-none animate-slide-up" id="floating-live-panel-fullscreen">
-                              
-                              {/* Driver card */}
->>>>>>> f68308996d3c85a5177b29f3c22c44aa3ff0af2c
                               <div className="bg-slate-900/95 backdrop-blur-md rounded-2xl p-4 border border-indigo-500/20 shadow-2xl pointer-events-auto text-left">
                                 <div className="flex justify-between items-center mb-3">
                                   <div className="text-left">
                                     <span className="text-[10px] font-bold text-indigo-400 font-mono tracking-widest uppercase animate-pulse block">🚜 GRÚA EN RUTA</span>
                                     <h3 className="text-xs font-black text-white mt-1">Conductor: {activeAssistance.driverName || 'Operador de Guardia'}</h3>
                                     <div className="flex items-center gap-2 mt-1">
-<<<<<<< HEAD
                                       <span className="text-[9px] bg-indigo-900 text-yellow-400 px-1.5 py-0.5 rounded font-bold uppercase tracking-wider border border-yellow-500/30">
                                         Placa: {activeAssistance.vehiclePlate}
-=======
-                                      {activeAssistance.driverPhone && (
-                                        <span className="text-[10px] text-slate-400 font-mono">{activeAssistance.driverPhone}</span>
-                                      )}
-                                      <span className="text-[9px] bg-indigo-900 text-yellow-400 px-1.5 py-0.5 rounded font-bold uppercase tracking-wider border border-yellow-500/30">
-                                        Placa: {activeAssistance.vehiclePlate || 'A92B45X'}
->>>>>>> f68308996d3c85a5177b29f3c22c44aa3ff0af2c
                                       </span>
                                     </div>
                                   </div>
@@ -7227,7 +5774,6 @@ const handleSendMedicAI = async () => {
                                   </span>
                                 </div>
 
-<<<<<<< HEAD
                                 <div className="bg-slate-950/80 p-3 rounded-xl border border-white/5 text-[9.5px] space-y-1 font-mono mb-3">
                                   <div className="flex justify-between text-slate-400"><span>Costo Total:</span><span className="font-bold text-red-400">$ {(activeAssistance.price || 30).toFixed(2)} USD</span></div>
                                 </div>
@@ -7236,67 +5782,6 @@ const handleSendMedicAI = async () => {
                                   <button onClick={handleCancelTowRequest} className="bg-red-950/60 border border-red-500/20 hover:bg-red-900/40 text-red-400 px-4 py-2.5 rounded-xl text-[10px] font-bold uppercase transition-all font-mono">Cancelar</button>
                                   <button onClick={() => setCitizenTab('agent')} className="flex-1 bg-indigo-650 hover:bg-indigo-600 text-white py-2.5 rounded-xl text-xs font-black uppercase text-center shadow-lg">💬 Chat / Agente</button>
                                   <button onClick={() => { setIsTowDailyCoActive(!isTowDailyCoActive); setTowDailyCoUrl(activeVialAssist?.sala_webrtc_url || ""); }} className="bg-slate-800 hover:bg-slate-755 text-indigo-300 px-3.5 py-2.5 rounded-xl text-xs font-bold border border-white/5 uppercase">📹 {isTowDailyCoActive ? 'Ocultar' : 'Video'}</button>
-=======
-                                {/* Pricing Breakdown */}
-                                <div className="bg-slate-950/80 p-3 rounded-xl border border-white/5 text-[9.5px] space-y-1 font-mono mb-3">
-                                  {(() => {
-                                    const distKm = (activeAssistance.distance || 5400) / 1000;
-                                    const baseFee = tariffs.grua?.tarifa_base ?? 30.00;
-                                    const kmRate = tariffs.grua?.precio_por_km ?? 4.50;
-                                    const costKm = distKm * kmRate;
-                                    const totalCalculated = baseFee + costKm;
-                                    return (
-                                      <>
-                                        <div className="flex justify-between text-slate-400">
-                                          <span>Tarifa Base:</span>
-                                          <span>$ {baseFee.toFixed(2)} USD</span>
-                                        </div>
-                                        <div className="flex justify-between text-slate-400">
-                                          <span>Precio por Km:</span>
-                                          <span>$ {kmRate.toFixed(2)} USD</span>
-                                        </div>
-                                        <div className="flex justify-between text-slate-400">
-                                          <span>Distancia:</span>
-                                          <span>{distKm.toFixed(2)} Km ({costKm.toFixed(2)} USD)</span>
-                                        </div>
-                                        <div className="flex justify-between border-t border-white/5 pt-1.5 font-sans font-bold text-xs mt-1 text-red-400">
-                                          <span>Costo Total:</span>
-                                          <span>$ {totalCalculated.toFixed(2)} USD</span>
-                                        </div>
-                                      </>
-                                    );
-                                  })()}
-                                </div>
-
-                                <div className="flex gap-2">
-                                  <button 
-                                    onClick={() => {
-                                      showMaterialAlert('Cancelando Asistencia', 'Procediendo a cancelar despacho vial...');
-                                      handleCancelTowRequest();
-                                    }}
-                                    className="bg-red-950/60 border border-red-500/20 hover:bg-red-900/40 text-red-005 px-4 py-2.5 rounded-xl text-xs font-bold uppercase transition-all select-none font-mono text-red-400"
-                                  >
-                                    Cancelar
-                                  </button>
-                                  <button 
-                                    onClick={() => {
-                                      setCitizenTab('agent');
-                                    }}
-                                    className="flex-1 bg-indigo-650 hover:bg-indigo-600 text-white py-2.5 rounded-xl text-xs font-black tracking-wide transition-all text-center uppercase shadow-lg select-none"
-                                  >
-                                    💬 Mensajes con Grúa
-                                  </button>
-                                  <button 
-                                    onClick={() => {
-                                      setIsTowDailyCoActive(!isTowDailyCoActive);
-                                      const webrtcUrl = activeVialAssist?.sala_webrtc_url || (activeTowJob ? "https://iframe.daily.co/secureflow-tow-" + activeTowJob.id : "");
-                                      setTowDailyCoUrl(webrtcUrl);
-                                    }}
-                                    className="bg-slate-800 hover:bg-slate-755 text-indigo-300 px-3.5 py-2.5 rounded-xl text-xs font-bold border border-white/5 transition-all uppercase flex items-center justify-center gap-1"
-                                  >
-                                    📹 {isTowDailyCoActive ? 'Ocultar' : 'Video WebRTC'}
-                                  </button>
->>>>>>> f68308996d3c85a5177b29f3c22c44aa3ff0af2c
                                 </div>
                               </div>
                             </div>
@@ -8537,12 +7022,7 @@ const handleSendMedicAI = async () => {
                                 </div>
                               </div>
                             )}
-<<<<<<< HEAD
 {/* Incoming dispatch notifications to show multi-view communication */}
-=======
-
-                            {/* Incoming dispatch notifications to show multi-view communication */}
->>>>>>> f68308996d3c85a5177b29f3c22c44aa3ff0af2c
                             {towState === 'proposed' && activeTowJob && (
                               <div className="bg-yellow-500 text-slate-950 p-4 rounded-3xl space-y-3 shadow-xl animate-pulse">
                                 <div>
@@ -8551,7 +7031,6 @@ const handleSendMedicAI = async () => {
                                   </span>
                                   <h4 className="text-sm font-black mt-2">Asegurado: {activeTowJob.citizenName}</h4>
                                   {(() => {
-<<<<<<< HEAD
                                     // Matemáticas con los datos GPS reales extraídos de la BD
                                     const distKm = (activeTowJob.distance || 0) / 1000;
                                     const baseF = tariffs.grua?.tarifa_base ?? 30.00;
@@ -8565,21 +7044,6 @@ const handleSendMedicAI = async () => {
                                         <p>• Costo por Distancia: <span className="font-sans font-bold">${costKm > 0 ? costKm.toFixed(2) : '0.00'} USD</span></p>
                                         <p className="border-t border-black/10 pt-1">• Costo Total a Cobrar: <span className="font-sans font-bold text-xs">${totalCalculated.toFixed(2)} USD</span></p>
                                         <p className="font-sans font-extrabold text-slate-950">💰 Tu Ganancia Neta (80%): ${driverEarnings.toFixed(2)} USD</p>
-=======
-                                    const distKm = (activeTowJob.distance || 5400) / 1000;
-                                    const baseF = tariffs.grua?.tarifa_base ?? 30.00;
-                                    const kmR = tariffs.grua?.precio_por_km ?? 4.50;
-                                    const costKm = distKm * kmR;
-                                    const totalCalculated = baseF + costKm;
-                                    const driverEarnings = totalCalculated * 0.80; // 80% split for driver, 20% platform
-                                    return (
-                                      <div className="text-[11px] text-slate-800 space-y-1 mt-2 font-mono">
-                                        <p>• Distancia real (GPS): <span className="font-sans font-bold">{distKm.toFixed(2)} Km</span></p>
-                                        <p>• Tarifa Base: <span className="font-sans font-bold">${baseF.toFixed(2)} USD</span></p>
-                                        <p>• Costo por Km (${kmR.toFixed(2)}/km): <span className="font-sans font-bold">${costKm.toFixed(2)} USD</span></p>
-                                        <p className="border-t border-black/10 pt-1">• Costo Total: <span className="font-sans font-bold text-xs">${totalCalculated.toFixed(2)} USD</span></p>
-                                        <p className="font-sans font-extrabold text-slate-950">💰 Ganancia Estimada (80%): ${driverEarnings.toFixed(2)} USD</p>
->>>>>>> f68308996d3c85a5177b29f3c22c44aa3ff0af2c
                                       </div>
                                     );
                                   })()}
@@ -8604,13 +7068,6 @@ const handleSendMedicAI = async () => {
                                   </span>
                                   <span className="text-[10px] text-slate-400 font-mono">ID: {activeTowJob.id.substring(0, 8).toUpperCase()}</span>
                                 </div>
-
-                                <button
-                                  onClick={handleSimulateDriverProgress}
-                                  className="w-full bg-yellow-500 hover:bg-yellow-600 text-slate-950 py-2.5 rounded-xl text-[10px] font-black uppercase tracking-wider flex items-center justify-center gap-1.5 transition-all shadow-md active:scale-95"
-                                >
-                                  <span>🚜 Avanzar Ruta Grúa (Simular GPS)</span>
-                                </button>
 
                                 {/* Street map tracking active real Leaflet component */}
                                 {towState === 'dispatched' && craneUnitState?.lat_actual && craneUnitState?.lng_actual && (activeTowJob?.latitude || 10.4984) && (activeTowJob?.longitude || -66.8824) ? (
